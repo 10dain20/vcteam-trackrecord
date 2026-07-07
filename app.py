@@ -9,6 +9,8 @@ import requests
 from datetime import date, timedelta
 import calendar
 import math
+import os
+import json
 import threading
 import gspread
 from google.oauth2.service_account import Credentials
@@ -21,6 +23,8 @@ SHEET_ID = "1xYZqiMRclX6OkQn0V-RVwteC4D8OMUjDd22-3fb3hbg"
 API_KEY = "AIzaSyDTbY36CW4NqgqiZIv-_FuoRWMzAykNZ3U"
 
 # DIRECT_HOLDINGS 쓰기용 서비스 계정 (읽기는 API_KEY로, 쓰기는 이 계정으로 수행)
+# 로컬 개발: secrets/service-account.json 파일 사용
+# 배포(Vercel 등): GOOGLE_SERVICE_ACCOUNT_JSON 환경변수에 서비스 계정 JSON 전체를 문자열로 저장
 SERVICE_ACCOUNT_FILE = "secrets/service-account.json"
 SHEETS_WRITE_SCOPES = ["https://www.googleapis.com/auth/spreadsheets"]
 
@@ -63,7 +67,11 @@ def get_gspread_worksheet(sheet_name):
     """쓰기 권한이 있는 서비스 계정으로 워크시트 핸들을 가져옵니다 (최초 1회만 인증 후 재사용)."""
     with _gspread_lock:
         if sheet_name not in _gspread_ws_cache:
-            creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SHEETS_WRITE_SCOPES)
+            service_account_json = os.environ.get("GOOGLE_SERVICE_ACCOUNT_JSON")
+            if service_account_json:
+                creds = Credentials.from_service_account_info(json.loads(service_account_json), scopes=SHEETS_WRITE_SCOPES)
+            else:
+                creds = Credentials.from_service_account_file(SERVICE_ACCOUNT_FILE, scopes=SHEETS_WRITE_SCOPES)
             gc = gspread.authorize(creds)
             sh = gc.open_by_key(SHEET_ID)
             _gspread_ws_cache[sheet_name] = sh.worksheet(sheet_name)

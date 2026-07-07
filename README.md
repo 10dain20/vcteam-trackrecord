@@ -118,5 +118,19 @@ Google Sheets의 각 시트:
 ## 주의사항
 
 - Google Sheet는 공개 설정되어야 함
-- 두 개의 서버가 동시에 실행되어야 함 (Frontend 8743, Backend 5001)
+- 로컬 개발 시 두 개의 서버가 동시에 실행되어야 함 (Frontend 8743, Backend 5001)
 - Chrome/Safari 등 최신 브라우저 필요
+
+## Vercel 배포
+
+이 저장소는 `vercel.json`으로 Flask 백엔드(`app.py`)와 정적 프론트엔드(`index.html`)를
+하나의 프로젝트로 함께 배포하도록 구성되어 있습니다.
+
+1. [vercel.com](https://vercel.com)에서 New Project → 이 GitHub 저장소 Import
+2. Environment Variables에 `GOOGLE_SERVICE_ACCOUNT_JSON` 추가
+   - `secrets/service-account.json` 파일 내용 전체(JSON)를 값으로 붙여넣기
+   - 이 변수가 없으면 DIRECT_HOLDINGS 갱신(쓰기) 기능만 실패하고, 나머지 조회 기능은 정상 동작
+3. Deploy 클릭 → 완료 후 `https://<project>.vercel.app`으로 접속
+
+배포 환경에서는 프론트엔드가 같은 도메인의 `/api`로 상대 경로 호출을 하므로
+별도 CORS/URL 설정이 필요 없습니다.
