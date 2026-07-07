@@ -1,0 +1,2203 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>VC투자팀 Track Record</title>
+<link rel="stylesheet" as="style" crossorigin
+  href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.css" />
+<style>
+  :root {
+    --border: #dddddd;
+    --gray: #666666;
+    --navy: #0f2247;
+    --navy-tint: rgba(15, 34, 71, 0.04);
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #ffffff;
+    color: #000000;
+    font-family: "Pretendard", -apple-system, BlinkMacSystemFont, sans-serif;
+  }
+
+  /* ---------- 잠금 화면 ---------- */
+  #lock-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .lock-box {
+    width: 100%;
+    max-width: 340px;
+    padding: 40px 32px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    text-align: center;
+  }
+
+  .lock-box h1 {
+    font-size: 18px;
+    font-weight: 600;
+    margin: 0 0 4px;
+  }
+
+  .lock-box p {
+    font-size: 13px;
+    color: var(--gray);
+    margin: 0 0 24px;
+  }
+
+  .lock-box input[type="password"] {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: #000000;
+    background: #ffffff;
+    margin-bottom: 12px;
+  }
+
+  .lock-box button {
+    width: 100%;
+    padding: 10px 12px;
+    font-size: 14px;
+    font-family: inherit;
+    font-weight: 600;
+    background: #000000;
+    color: #ffffff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+  }
+
+  .lock-box button:hover {
+    background: #333333;
+  }
+
+  #lock-error {
+    color: #cc0000;
+    font-size: 12px;
+    margin-top: 10px;
+    min-height: 16px;
+  }
+
+  /* ---------- 메인 화면 ---------- */
+  #app {
+    display: none;
+    width: 100%;
+    max-width: 1800px;
+    margin: 0 auto;
+    padding: 40px 40px 80px;
+  }
+
+  header {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    border-bottom: 1px solid #000000;
+    padding-bottom: 16px;
+    margin-bottom: 32px;
+  }
+
+  header h1 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+  }
+
+  #logout {
+    font-size: 12px;
+    color: var(--gray);
+    background: none;
+    border: none;
+    cursor: pointer;
+    font-family: inherit;
+    text-decoration: underline;
+  }
+
+  section {
+    margin-bottom: 40px;
+  }
+
+  section h2 {
+    font-size: 15px;
+    font-weight: 600;
+    margin: 0 0 12px;
+  }
+
+  .section-title {
+    font-size: 21px !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.01em;
+    padding-left: 13px;
+    border-left: 4px solid var(--navy);
+  }
+
+  section p.desc {
+    font-size: 13px;
+    color: var(--gray);
+    margin: 0 0 16px;
+    line-height: 1.6;
+  }
+
+  .upload-box {
+    border: 1px dashed var(--border);
+    border-radius: 8px;
+    padding: 32px;
+    text-align: center;
+  }
+
+  .upload-box input[type="file"] {
+    font-family: inherit;
+    font-size: 13px;
+  }
+
+  #file-name {
+    margin-top: 12px;
+    font-size: 13px;
+    color: var(--gray);
+  }
+
+  /* ---------- 검증 탭 ---------- */
+  .verification-row {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 16px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+
+  .verification-label {
+    font-size: 14px;
+    font-weight: 600;
+    min-width: 260px;
+    flex-shrink: 0;
+  }
+
+  .verification-row input[type="file"] {
+    font-family: inherit;
+    font-size: 13px;
+  }
+
+  .verification-row .file-name {
+    margin-left: 12px;
+    font-size: 12px;
+    color: var(--gray);
+  }
+
+  .verify-result {
+    margin-top: 10px;
+    font-size: 13px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+
+  th, td {
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    text-align: left;
+  }
+
+  th {
+    background: #fafafa;
+    font-weight: 600;
+  }
+
+  .placeholder {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 24px;
+    font-size: 13px;
+    color: var(--gray);
+  }
+
+  footer {
+    font-size: 11px;
+    color: var(--gray);
+    text-align: center;
+    margin-top: 60px;
+  }
+
+  .tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 32px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .tab-btn {
+    padding: 12px 16px;
+    font-size: 14px;
+    font-family: inherit;
+    font-weight: 600;
+    background: none;
+    border: none;
+    cursor: pointer;
+    color: var(--gray);
+    border-bottom: 2px solid transparent;
+    margin-bottom: -1px;
+  }
+
+  .tab-btn.active {
+    color: #000000;
+    border-bottom-color: #000000;
+  }
+
+  .tab-btn:hover {
+    color: #000000;
+  }
+
+  .tab-content {
+    display: none;
+  }
+
+  .tab-content.active {
+    display: block;
+  }
+
+  /* ---------- 펀드별 수익률: 입력 컨트롤 (한 줄) ---------- */
+  .control-box {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: 12px;
+  }
+
+  .inline-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding: 12px 14px;
+  }
+
+
+  .inline-controls .field-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray);
+    white-space: nowrap;
+  }
+
+  .inline-controls select {
+    padding: 6px 8px;
+    font-family: inherit;
+    font-size: 12px;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    background: #fff;
+    color: #000;
+    white-space: nowrap;
+  }
+
+  .inline-controls .radio-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    white-space: nowrap;
+  }
+
+  .inline-controls .radio-group label {
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    font-size: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .inline-controls .radio-group input {
+    cursor: pointer;
+    margin: 0;
+  }
+
+  .inline-controls .divider {
+    width: 1px;
+    height: 20px;
+    background: var(--border);
+    flex-shrink: 0;
+  }
+
+  #btn-confirm {
+    margin-left: auto;
+    padding: 8px 18px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    background: #000;
+    color: #fff;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  #btn-confirm:disabled {
+    background: #cccccc;
+    cursor: not-allowed;
+  }
+
+  #fx-spot-inputs {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  #fx-spot-currencies {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 14px;
+    flex-shrink: 0;
+  }
+
+  #fx-spot-currencies .fx-spot-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  #fx-spot-currencies label {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+
+  #fx-spot-currencies input {
+    width: 100px;
+    padding: 6px 8px;
+    font-size: 12px;
+    font-family: inherit;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+  }
+
+  #fx-spot-currencies input.fx-suspicious {
+    border-color: #cc0000;
+  }
+
+  /* ---------- Fund Metrics ---------- */
+  .hero-metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+  }
+
+  .hero-metric-box {
+    border: 1.5px solid var(--navy);
+    border-radius: 12px;
+    padding: 20px 22px;
+    background: var(--navy-tint);
+    box-shadow: 0 1px 3px rgba(15, 34, 71, 0.06);
+    transition: box-shadow 0.15s ease;
+  }
+
+  .hero-metric-box:hover {
+    box-shadow: 0 4px 10px rgba(15, 34, 71, 0.1);
+  }
+
+  .hero-metric-label {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: var(--gray);
+    margin-bottom: 10px;
+  }
+
+  .hero-metric-value {
+    font-size: 25px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--navy);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .hero-metric-value-sub {
+    font-size: 15px;
+    font-weight: 400;
+    color: var(--gray);
+  }
+
+  .metrics-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    margin-bottom: 32px;
+  }
+
+  .metric-card {
+    flex: 1 1 200px;
+    min-width: 190px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+    font-size: 12px;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+  }
+
+  .metric-card-header {
+    background: var(--navy);
+    color: #ffffff;
+    padding: 9px 14px;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+  }
+
+  .metric-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 7px 14px;
+    border-top: 1px solid var(--border);
+  }
+
+  .metric-row.section {
+    background: var(--navy-tint);
+    font-weight: 600;
+    letter-spacing: 0.01em;
+  }
+
+  .metric-row.item {
+    padding-left: 20px;
+    color: var(--gray);
+  }
+
+  .metric-row .value {
+    font-variant-numeric: tabular-nums;
+    color: #000000;
+    font-weight: 600;
+    text-align: right;
+  }
+
+  .metric-row.item .value {
+    font-weight: 400;
+  }
+
+  .metric-row.italic .value {
+    font-style: italic;
+  }
+
+  /* ---------- Investment Overview ---------- */
+  .overview-header-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-top: 32px;
+    margin-bottom: 16px;
+  }
+
+  .overview-header-left {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+  }
+
+  .overview-header-left h2 {
+    margin: 0;
+  }
+
+  .currency-toggle-switch {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .currency-toggle-switch .toggle-label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--gray);
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .currency-toggle-switch .toggle-label.active {
+    color: #000;
+    font-weight: 700;
+  }
+
+  .switch {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+  }
+
+  .switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+  }
+
+  .switch-slider {
+    position: absolute;
+    inset: 0;
+    background: #cccccc;
+    border-radius: 22px;
+    cursor: pointer;
+    transition: background 0.2s ease;
+  }
+
+  .switch-slider::before {
+    content: "";
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 3px;
+    top: 3px;
+    background: #ffffff;
+    border-radius: 50%;
+    transition: transform 0.2s ease;
+  }
+
+  .switch input:checked + .switch-slider {
+    background: #000000;
+  }
+
+  .switch input:checked + .switch-slider::before {
+    transform: translateX(18px);
+  }
+
+  #btn-export,
+  #btn-export-cashflow,
+  .btn-file-upload {
+    padding: 7px 16px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    background: #fff;
+    color: #000;
+    border: 1px solid #000;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-block;
+  }
+
+  #btn-export:hover,
+  #btn-export-cashflow:hover,
+  .btn-file-upload:hover {
+    background: #000;
+    color: #fff;
+  }
+
+  /* 표를 감싸는 카드: border-radius + overflow:hidden으로 모서리를 확실히 clip합니다.
+     (내부 #...-table-wrap의 overflow-x:auto와 분리 - overflow-x/y가 섞이면 border-radius가
+     모서리에 제대로 clip되지 않는 브라우저 동작이 있어, 스크롤 담당과 모서리 clip 담당을 분리했습니다.) */
+  .table-card {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+
+  .table-card-fit {
+    display: inline-block;
+    max-width: 100%;
+  }
+
+  #overview-table-wrap {
+    overflow-x: auto;
+  }
+
+  #overview-table-wrap table {
+    font-size: 12px;
+    table-layout: fixed;
+    border: none;
+  }
+
+  #overview-table-wrap th,
+  #overview-table-wrap td {
+    white-space: normal;
+    word-break: keep-all;
+    overflow-wrap: break-word;
+  }
+
+  #overview-table-wrap thead th {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+    background: var(--navy);
+    color: #ffffff;
+  }
+
+  #overview-table-wrap th .sort-arrow {
+    display: inline-block;
+    margin-left: 4px;
+    color: #999999;
+    font-size: 10px;
+  }
+
+  #overview-table-wrap th.sorted .sort-arrow {
+    color: #ffffff;
+  }
+
+  #overview-table-wrap td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  #overview-table-wrap tbody td:first-child {
+    background: #f5f5f5;
+  }
+
+  #overview-table-wrap tr.overview-sum-row td {
+    font-weight: 700;
+    border-top: 2px solid #000000;
+    background: #f5f5f5;
+  }
+
+  /* ---------- Fund Cash Flow: 필요한 만큼만 폭을 차지 (전체 100% 스트레치 방지) ---------- */
+  #cashflow-table-wrap {
+    overflow-x: auto;
+  }
+
+  #cashflow-table-wrap table {
+    width: auto;
+    font-size: 12px;
+    border: none;
+  }
+
+  #cashflow-table-wrap th,
+  #cashflow-table-wrap td {
+    white-space: nowrap;
+  }
+
+  #cashflow-table-wrap thead th {
+    cursor: pointer;
+    user-select: none;
+    background: var(--navy);
+    color: #ffffff;
+  }
+
+  #cashflow-table-wrap th .sort-arrow {
+    display: inline-block;
+    margin-left: 4px;
+    color: #999999;
+    font-size: 10px;
+  }
+
+  #cashflow-table-wrap th.sorted .sort-arrow {
+    color: #ffffff;
+  }
+
+  #cashflow-table-wrap td.num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .ownership-note {
+    font-size: 11px;
+    color: var(--gray);
+    margin-top: 8px;
+  }
+
+  .overview-warning {
+    font-size: 12px;
+    color: #cc0000;
+    margin-bottom: 12px;
+  }
+
+  /* ---------- Toast ---------- */
+  #toast {
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    background: #000000;
+    color: #ffffff;
+    padding: 12px 18px;
+    border-radius: 6px;
+    font-size: 13px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+    opacity: 0;
+    transform: translateY(10px);
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    pointer-events: none;
+    z-index: 1000;
+    max-width: 320px;
+  }
+
+  #toast.show {
+    opacity: 1;
+    transform: translateY(0);
+  }
+</style>
+</head>
+<body>
+
+  <!-- 잠금 화면 -->
+  <div id="lock-screen">
+    <div class="lock-box">
+      <h1>VC투자팀 Track Record</h1>
+      <p>팀 전용 페이지입니다. 비밀번호를 입력해 주세요.</p>
+      <input type="password" id="password-input" placeholder="비밀번호" autocomplete="off" />
+      <button id="unlock-btn">입장</button>
+      <div id="lock-error"></div>
+    </div>
+  </div>
+
+  <!-- 메인 화면 -->
+  <div id="app">
+    <header>
+      <h1>VC투자팀 Track Record</h1>
+      <button id="logout">잠금 화면으로</button>
+    </header>
+
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="vc-team">VC투자팀</button>
+      <button class="tab-btn" data-tab="fund-return">펀드별 수익률</button>
+      <button class="tab-btn" data-tab="verification">검증</button>
+    </div>
+
+    <!-- Tab 1: VC투자팀 -->
+    <div id="vc-team" class="tab-content active">
+      <section>
+        <h2>VC투자팀 데이터</h2>
+        <p class="desc">펀드 및 투자 정보를 관리합니다.</p>
+        <div class="placeholder">준비 중입니다.</div>
+      </section>
+    </div>
+
+    <!-- Tab 2: 펀드별 수익률 -->
+    <div id="fund-return" class="tab-content">
+      <section>
+        <div class="control-box">
+          <!-- 입력 컨트롤 (한 줄) -->
+          <div class="inline-controls">
+            <span class="field-label">FUND</span>
+            <select id="select-fund">
+              <option value="">펀드 선택 중...</option>
+            </select>
+
+            <div class="divider"></div>
+
+            <span class="field-label">기간</span>
+            <select id="select-year" disabled>
+              <option value="">연도</option>
+            </select>
+            <select id="select-month" disabled>
+              <option value="">월</option>
+            </select>
+
+            <div class="divider"></div>
+
+            <span class="field-label">투자금 기준</span>
+            <div class="radio-group">
+              <label><input type="radio" name="fx-option" value="EXECUTED"> 집행환율</label>
+              <label><input type="radio" name="fx-option" value="BASE"> 약정일환율</label>
+              <label><input type="radio" name="fx-option" value="SPOT"> SPOT환율</label>
+            </div>
+
+            <div class="divider"></div>
+
+            <span class="field-label">MARKUP</span>
+            <div class="radio-group">
+              <label><input type="radio" name="markup-option" value="ACTUAL"> ACTUAL</label>
+              <label><input type="radio" name="markup-option" value="EXPECTED"> EXPECTED</label>
+            </div>
+
+            <div class="divider" id="fx-spot-divider" style="display: none;"></div>
+
+            <!-- SPOT 환율 입력: REALIZED/UNREALIZED은 항상 SPOT 환율로 계산되므로 펀드 선택 시 항상 입력 필요 -->
+            <div id="fx-spot-inputs">
+              <span class="field-label">SPOT INPUT</span>
+              <div id="fx-spot-currencies"></div>
+            </div>
+
+            <button id="btn-confirm" disabled>확인</button>
+          </div>
+        </div>
+
+        <!-- 결과 영역 -->
+        <div id="fund-return-result" class="placeholder" style="text-align: center; padding: 40px;">
+          모든 옵션을 선택하고 확인 버튼을 누르면 결과가 여기에 표시됩니다.
+        </div>
+
+        <!-- Fund Metrics -->
+        <div id="fund-metrics" style="display: none;">
+          <h2 class="section-title" style="margin: 0 0 16px;">Fund Metrics</h2>
+
+          <div class="hero-metrics">
+            <div class="hero-metric-box">
+              <div class="hero-metric-label">NAV</div>
+              <div class="hero-metric-value" id="fm-nav">-</div>
+            </div>
+            <div class="hero-metric-box">
+              <div class="hero-metric-label">MOIC (Gross / Net)</div>
+              <div class="hero-metric-value"><span id="fm-moic-gross">-</span><span class="hero-metric-value-sub"> / <span id="fm-moic-net">-</span></span></div>
+            </div>
+            <div class="hero-metric-box">
+              <div class="hero-metric-label">IRR (Gross / Net)</div>
+              <div class="hero-metric-value"><span id="fm-irr-gross">-</span><span class="hero-metric-value-sub"> / <span id="fm-irr-net">-</span></span></div>
+            </div>
+            <div class="hero-metric-box">
+              <div class="hero-metric-label">소진율 (미포함 / 포함)</div>
+              <div class="hero-metric-value"><span id="fm-deployment-excl">-</span><span class="hero-metric-value-sub"> / <span id="fm-deployment-incl">-</span></span></div>
+            </div>
+          </div>
+
+          <div class="metrics-grid">
+            <div class="metric-card">
+              <div class="metric-card-header"><span>BASICS</span></div>
+              <div class="metric-row section">기본 정보</div>
+              <div class="metric-row item"><span>약정통화</span><span class="value" id="fm-currency">-</span></div>
+              <div class="metric-row item"><span>약정액</span><span class="value" id="fm-commitment">-</span></div>
+              <div class="metric-row item italic"><span>목표수익률</span><span class="value" id="fm-target-irr">-</span></div>
+              <div class="metric-row section">주요 일정</div>
+              <div class="metric-row item"><span>약정일</span><span class="value" id="fm-date-sub">-</span></div>
+              <div class="metric-row item"><span>설정일</span><span class="value" id="fm-date-inception">-</span></div>
+              <div class="metric-row item"><span>투자 종료일</span><span class="value" id="fm-date-term">-</span></div>
+              <div class="metric-row item"><span>만기일</span><span class="value" id="fm-date-maturity">-</span></div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-card-header"><span>DEPLOYMENT</span></div>
+              <div class="metric-row section"><span>Capital Called</span><span class="value" id="fm-capital-called">-</span></div>
+              <div class="metric-row item"><span>투자금</span><span class="value" id="fm-invested">-</span></div>
+              <div class="metric-row item"><span>펀드 비용</span><span class="value" id="fm-fund-expense">-</span></div>
+              <div class="metric-row section">잔여약정액</div>
+              <div class="metric-row item"><span>비용 미포함 시</span><span class="value" id="fm-remaining-excl">-</span></div>
+              <div class="metric-row item"><span>비용 포함 시</span><span class="value" id="fm-remaining-incl">-</span></div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-card-header"><span>INVESTMENT</span></div>
+              <div class="metric-row section">포트폴리오</div>
+              <div class="metric-row item"><span>총 투자 건수</span><span class="value" id="fm-deal-count">-</span></div>
+              <div class="metric-row item"><span>포트폴리오 기업 수</span><span class="value" id="fm-portfolio-companies">-</span></div>
+              <div class="metric-row section">투자 규모</div>
+              <div class="metric-row item"><span>Minimum Ticket</span><span class="value" id="fm-min-ticket">-</span></div>
+              <div class="metric-row item"><span>Average Ticket</span><span class="value" id="fm-avg-ticket">-</span></div>
+              <div class="metric-row item"><span>Maximum Ticket</span><span class="value" id="fm-max-ticket">-</span></div>
+              <div class="metric-row section">Average Ownership</div>
+              <div class="metric-row item"><span>지분율(기준일 평균)</span><span class="value" id="fm-avg-ownership">-</span></div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-card-header"><span>REALIZATION</span></div>
+              <div class="metric-row section"><span>Total Realized</span><span class="value" id="fm-total-realized">-</span></div>
+              <div class="metric-row item"><span>장내매각</span><span class="value" id="fm-onmarket">-</span></div>
+              <div class="metric-row item"><span>장외매각</span><span class="value" id="fm-offmarket">-</span></div>
+              <div class="metric-row item"><span>이자수령</span><span class="value" id="fm-interest">-</span></div>
+            </div>
+
+            <div class="metric-card">
+              <div class="metric-card-header"><span>HEDGE</span></div>
+              <div class="metric-row section">헤지율</div>
+              <div class="metric-row item"><span>목표 헤지율</span><span class="value" id="fm-target-hedge">-</span></div>
+              <div id="fm-hedge-by-currency"></div>
+              <div class="metric-row section">정산손익</div>
+              <div class="metric-row item"><span>정산익</span><span class="value" id="fm-settlement-gain-only">-</span></div>
+              <div class="metric-row item"><span>정산손</span><span class="value" id="fm-settlement-loss-only">-</span></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Investment Overview -->
+        <div id="investment-overview" style="display: none;">
+          <div class="overview-header-row">
+            <div class="overview-header-left">
+              <h2 class="section-title">Investment Overview</h2>
+              <div class="currency-toggle-switch">
+                <span class="toggle-label active" id="label-native">투자통화</span>
+                <label class="switch">
+                  <input type="checkbox" id="currency-switch">
+                  <span class="switch-slider"></span>
+                </label>
+                <span class="toggle-label" id="label-fund">펀드통화</span>
+              </div>
+            </div>
+            <button id="btn-export">엑셀다운로드</button>
+          </div>
+
+          <div id="overview-warnings"></div>
+
+          <div class="table-card"><div id="overview-table-wrap"></div></div>
+
+          <p class="ownership-note">* 전환형 투자로 전환 시 예상 지분율</p>
+        </div>
+
+        <!-- Fund Cash Flow -->
+        <div id="fund-cashflow" style="display: none;">
+          <div class="overview-header-row">
+            <div class="overview-header-left">
+              <h2 id="cashflow-title" class="section-title">Fund Cash Flow</h2>
+              <div class="currency-toggle-switch">
+                <span class="toggle-label active" id="label-net">Net</span>
+                <label class="switch">
+                  <input type="checkbox" id="cashflow-mode-switch">
+                  <span class="switch-slider"></span>
+                </label>
+                <span class="toggle-label" id="label-gross">Gross</span>
+              </div>
+            </div>
+            <button id="btn-export-cashflow">엑셀다운로드</button>
+          </div>
+
+          <div id="cashflow-warnings"></div>
+
+          <div class="table-card table-card-fit"><div id="cashflow-table-wrap"></div></div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Tab 3: 검증 -->
+    <div id="verification" class="tab-content">
+      <section>
+        <h2>검증</h2>
+        <p class="desc">외부 시스템 데이터와 대조 검증을 위한 파일을 업로드합니다.</p>
+
+        <div class="control-box">
+          <div class="inline-controls">
+            <span class="field-label">FUND</span>
+            <select id="verify-select-fund">
+              <option value="">펀드 선택 중...</option>
+            </select>
+
+            <div class="divider"></div>
+
+            <span class="field-label">기간</span>
+            <select id="verify-select-year" disabled>
+              <option value="">연도</option>
+            </select>
+            <select id="verify-select-month" disabled>
+              <option value="">월</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="verification-row">
+          <div class="verification-label">통합자산운용시스템 Cash Flow</div>
+          <div>
+            <input type="file" id="upload-cashflow-system" style="display: none;" />
+            <label for="upload-cashflow-system" class="btn-file-upload">업로드</label>
+            <span class="file-name" id="file-name-cashflow-system"></span>
+            <div class="verify-result" id="verify-result-cashflow-system"></div>
+          </div>
+        </div>
+
+        <div class="verification-row">
+          <div class="verification-label">HINTS 신탁재산명세부</div>
+          <div>
+            <input type="file" id="upload-hints" style="display: none;" />
+            <label for="upload-hints" class="btn-file-upload">업로드</label>
+            <span class="file-name" id="file-name-hints"></span>
+            <div class="verify-result" id="verify-result-hints"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <footer>VC투자팀 내부용</footer>
+  </div>
+
+  <div id="toast"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script>
+    // ▼ 비밀번호는 여기서 바꿀 수 있습니다.
+    const PASSWORD = "Maxibest11^^";
+
+    const lockScreen = document.getElementById("lock-screen");
+    const app = document.getElementById("app");
+    const passwordInput = document.getElementById("password-input");
+    const unlockBtn = document.getElementById("unlock-btn");
+    const lockError = document.getElementById("lock-error");
+
+    function unlock() {
+      if (passwordInput.value === PASSWORD) {
+        sessionStorage.setItem("tr_unlocked", "1");
+        lockScreen.style.display = "none";
+        app.style.display = "block";
+        lockError.textContent = "";
+      } else {
+        lockError.textContent = "비밀번호가 올바르지 않습니다.";
+      }
+    }
+
+    unlockBtn.addEventListener("click", unlock);
+    passwordInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") unlock();
+    });
+
+    document.getElementById("logout").addEventListener("click", () => {
+      sessionStorage.removeItem("tr_unlocked");
+      app.style.display = "none";
+      lockScreen.style.display = "flex";
+      passwordInput.value = "";
+      passwordInput.focus();
+    });
+
+    // ===== Toast 알림 =====
+    let toastTimeout = null;
+    function showToast(message) {
+      const toast = document.getElementById("toast");
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(toastTimeout);
+      toastTimeout = setTimeout(() => {
+        toast.classList.remove("show");
+      }, 3500);
+    }
+
+    // ===== Python 백엔드 API 설정 =====
+    const API_BASE_URL = "http://localhost:5001/api";
+
+    // ===== 펀드별 수익률 계산용 변수 =====
+    const fundReturnState = {
+      selectedDate: { year: null, month: null },
+      selectedFund: null,
+      selectedFundNickname: null,
+      fundCurrencies: [], // 해당 펀드의 집행 통화들
+      fxOption: null, // "EXECUTED", "BASE", "SPOT"
+      fxRates: {}, // { "USD": 1200, "EUR": 1500 } 형태
+      markupOption: null, // "ACTUAL", "EXPECTED"
+    };
+
+    // 확인 버튼 클릭 시 마지막으로 조회한 파라미터 (토글 시 재사용)
+    let lastConfirmedParams = null;
+    let displayCurrencyMode = "NATIVE"; // "NATIVE" | "FUND"
+
+    // Investment Overview 정렬/렌더링용 상태
+    let overviewRows = [];
+    let overviewFundCurrency = "KRW";
+    let sortState = { key: null, dir: 1 };
+
+    // Fund Cash Flow 정렬/렌더링용 상태
+    let cashflowRows = [];
+    let cashflowFundCurrency = "KRW";
+    let cashflowSortState = { key: "date", dir: 1 };
+    let cashflowMode = "NET"; // "NET" (Fund Expense 포함) | "GROSS" (Fund Expense 제외)
+
+    const CURRENCY_SYMBOL = { USD: "$", EUR: "€", JPY: "¥", GBP: "£" };
+
+    function formatCurrencyDisplay(value, currency) {
+      if (value === null || value === undefined || value === 0) return "-";
+      if (currency === "KRW") {
+        return `₩${(value / 100000000).toLocaleString("ko-KR", { maximumFractionDigits: 1, minimumFractionDigits: 1 })}억`;
+      }
+      const symbol = CURRENCY_SYMBOL[currency] || currency + " ";
+      return `${symbol}${(value / 1000000).toLocaleString("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 })}M`;
+    }
+
+    function formatMoic(value) {
+      if (value === null || value === undefined || value === 0) return "-";
+      return `${value.toFixed(2)}x`;
+    }
+
+    function formatPercent(value, estimated) {
+      if (value === null || value === undefined || value === 0) return "-";
+      return `${value.toFixed(2)}%${estimated ? " *" : ""}`;
+    }
+
+    let fundList = []; // /api/funds 응답 (nickname, inception 등)
+
+    // 필터 상태 저장/복원 (새로고침해도 FUND/기간/계산방식/MARKUP 유지 - SPOT 환율은 통화별로 별도 저장되어 있음)
+    const FILTER_STATE_KEY = "fundReturnFilterState";
+
+    function saveFilterState() {
+      localStorage.setItem(FILTER_STATE_KEY, JSON.stringify({
+        fund: fundReturnState.selectedFund || null,
+        year: fundReturnState.selectedDate.year || null,
+        month: fundReturnState.selectedDate.month || null,
+        fxOption: fundReturnState.fxOption || null,
+        markupOption: fundReturnState.markupOption || null,
+      }));
+    }
+
+    async function restoreFilterState() {
+      const raw = localStorage.getItem(FILTER_STATE_KEY);
+      if (!raw) return;
+
+      let state;
+      try {
+        state = JSON.parse(raw);
+      } catch (err) {
+        return;
+      }
+
+      if (state.fund && fundList.some((f) => f.nickname === state.fund)) {
+        document.getElementById("select-fund").value = state.fund;
+        await applyFundSelection(state.fund);
+      }
+
+      if (state.year && Array.from(yearSelect.options).some((o) => o.value === String(state.year))) {
+        yearSelect.value = String(state.year);
+        fundReturnState.selectedDate.year = state.year;
+        rebuildMonthOptions();
+      }
+
+      if (state.month && Array.from(monthSelect.options).some((o) => o.value === String(state.month))) {
+        monthSelect.value = String(state.month);
+        fundReturnState.selectedDate.month = state.month;
+      }
+
+      if (state.fxOption) {
+        const radio = document.querySelector(`input[name="fx-option"][value="${state.fxOption}"]`);
+        if (radio) {
+          radio.checked = true;
+          fundReturnState.fxOption = state.fxOption;
+        }
+      }
+
+      if (state.markupOption) {
+        const radio = document.querySelector(`input[name="markup-option"][value="${state.markupOption}"]`);
+        if (radio) {
+          radio.checked = true;
+          fundReturnState.markupOption = state.markupOption;
+        }
+      }
+
+      updateConfirmButtonState();
+    }
+
+    async function initFundReturnTab() {
+      try {
+        // Python 백엔드에서 펀드 목록 로드
+        const res = await fetch(`${API_BASE_URL}/funds`);
+        const funds = await res.json();
+        fundList = funds;
+
+        const fundSelect = document.getElementById("select-fund");
+        fundSelect.innerHTML = '<option value="">펀드 선택</option>';
+
+        funds.forEach((fund) => {
+          const option = document.createElement("option");
+          option.value = fund.nickname; // 펀드 닉네임을 값으로 사용
+          option.textContent = fund.nickname;
+          fundSelect.appendChild(option);
+        });
+      } catch (err) {
+        console.error("Error initializing fund return tab:", err);
+      }
+    }
+
+    function parseYmd(str) {
+      if (!str) return null;
+      const parts = String(str).split("-");
+      if (parts.length < 2) return null;
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10);
+      if (!year || !month) return null;
+      return { year, month };
+    }
+
+    // FUND 선택 시 통화 목록 + 기간(연/월) 제약 업데이트 (펀드 설정일 이전 기간은 선택 불가)
+    async function applyFundSelection(fundNickname) {
+      fundReturnState.selectedFund = fundNickname;
+      fundReturnState.selectedFundNickname = fundNickname;
+
+      const fundMeta = fundList.find((f) => f.nickname === fundNickname);
+      fundInceptionDate = fundMeta ? parseYmd(fundMeta.inception) : null;
+      rebuildYearOptions();
+
+      if (fundNickname) {
+        try {
+          const res = await fetch(`${API_BASE_URL}/currencies?fund=${encodeURIComponent(fundNickname)}`);
+          const currencies = await res.json();
+
+          fundReturnState.fundCurrencies = currencies;
+          fundReturnState.fxRates = {};
+
+          // REALIZED/UNREALIZED은 항상 SPOT 환율을 사용하므로, 투자금액 계산 방식과 무관하게 항상 입력 필요
+          document.getElementById("fx-spot-inputs").style.display = "flex";
+          document.getElementById("fx-spot-divider").style.display = "block";
+          updateFxSpotInputs();
+        } catch (err) {
+          console.error("Error fetching currencies:", err);
+        }
+      } else {
+        document.getElementById("fx-spot-inputs").style.display = "none";
+        document.getElementById("fx-spot-divider").style.display = "none";
+      }
+
+      updateConfirmButtonState();
+    }
+
+    document.getElementById("select-fund").addEventListener("change", async (e) => {
+      await applyFundSelection(e.target.value);
+      saveFilterState();
+    });
+
+    // 투자금액 계산 방식(EXECUTED/BASE/SPOT) 변경 - 투자금액 환산 방식에만 영향을 줍니다
+    document.querySelectorAll('input[name="fx-option"]').forEach((radio) => {
+      radio.addEventListener("change", (e) => {
+        fundReturnState.fxOption = e.target.value;
+        updateConfirmButtonState();
+        saveFilterState();
+      });
+    });
+
+    // SPOT 환율 입력 순서 우선순위: USD > EUR > GBP > JPY > 기타(알파벳순)
+    const FX_CURRENCY_ORDER = ["USD", "EUR", "GBP", "JPY"];
+
+    function sortCurrenciesForDisplay(currencies) {
+      return [...currencies].sort((a, b) => {
+        const ia = FX_CURRENCY_ORDER.indexOf(a);
+        const ib = FX_CURRENCY_ORDER.indexOf(b);
+        if (ia === -1 && ib === -1) return a.localeCompare(b);
+        if (ia === -1) return 1;
+        if (ib === -1) return -1;
+        return ia - ib;
+      });
+    }
+
+    // 통화별 정상 SPOT 환율 범위 (통화 1단위 = ? KRW). 벗어나면 오탈자 의심 토스트 표시
+    const FX_SANITY_RANGE = {
+      USD: [1000, 1600],
+      EUR: [1100, 1800],
+      GBP: [1300, 2100],
+      JPY: [6, 12],
+      CNY: [150, 250],
+    };
+
+    function isFxRateSuspicious(currency, value) {
+      const range = FX_SANITY_RANGE[currency];
+      if (!range) return false;
+      return value < range[0] || value > range[1];
+    }
+
+    // SPOT 환율 입력창 업데이트 (펀드 선택 시 항상 표시)
+    function updateFxSpotInputs() {
+      const container = document.getElementById("fx-spot-currencies");
+      container.innerHTML = "";
+
+      if (fundReturnState.fundCurrencies.length === 0) {
+        container.innerHTML = '<p style="font-size: 12px; color: var(--gray); margin: 0;">이 펀드는 KRW 외 통화로 집행된 투자가 없습니다.</p>';
+        return;
+      }
+
+      sortCurrenciesForDisplay(fundReturnState.fundCurrencies).forEach((currency) => {
+        const div = document.createElement("div");
+        div.className = "fx-spot-item";
+
+        const label = document.createElement("label");
+        label.textContent = `${currency}:`;
+
+        const input = document.createElement("input");
+        input.type = "number";
+        input.placeholder = "환율 입력";
+        input.min = "0";
+
+        // 이전에 입력했던 SPOT 환율을 기억해서 제안 (localStorage)
+        const remembered = localStorage.getItem(`fx_spot_rate_${currency}`);
+        if (remembered) {
+          input.value = remembered;
+          fundReturnState.fxRates[currency] = parseFloat(remembered);
+        }
+
+        input.addEventListener("input", (e) => {
+          const val = parseFloat(e.target.value);
+          if (e.target.value === "" || isNaN(val)) {
+            delete fundReturnState.fxRates[currency];
+          } else {
+            fundReturnState.fxRates[currency] = val;
+            localStorage.setItem(`fx_spot_rate_${currency}`, val);
+          }
+          updateConfirmButtonState();
+        });
+
+        input.addEventListener("blur", (e) => {
+          const val = parseFloat(e.target.value);
+          const suspicious = !isNaN(val) && isFxRateSuspicious(currency, val);
+          input.classList.toggle("fx-suspicious", suspicious);
+          if (suspicious) {
+            showToast(`Please double check your Spot FX Rate (${currency})`);
+          }
+        });
+
+        div.appendChild(label);
+        div.appendChild(input);
+        container.appendChild(div);
+      });
+    }
+
+    // MARKUP 옵션 변경
+    document.querySelectorAll('input[name="markup-option"]').forEach((radio) => {
+      radio.addEventListener("change", (e) => {
+        fundReturnState.markupOption = e.target.value;
+        updateConfirmButtonState();
+        saveFilterState();
+      });
+    });
+
+    // 연도/월 선택 (선택된 펀드의 설정일(FUND_INCEPTION) 이전 기간은 옵션에서 제외)
+    const yearSelect = document.getElementById("select-year");
+    const monthSelect = document.getElementById("select-month");
+    const today = new Date();
+    const currentYear = today.getFullYear();
+    const currentMonth = today.getMonth() + 1;
+    const lastCompletedMonth = currentMonth - 1; // 이번 달은 아직 끝나지 않았으므로 제외
+
+    let fundInceptionDate = null; // { year, month } | null (펀드 미선택 시 null)
+
+    function rebuildYearOptions() {
+      const prevValue = yearSelect.value;
+      yearSelect.innerHTML = '<option value="">연도</option>';
+
+      if (!fundInceptionDate) {
+        yearSelect.disabled = true;
+        monthSelect.disabled = true;
+        monthSelect.innerHTML = '<option value="">월</option>';
+        fundReturnState.selectedDate = { year: null, month: null };
+        return;
+      }
+
+      yearSelect.disabled = false;
+      const minYear = fundInceptionDate.year;
+
+      for (let year = currentYear; year >= minYear; year--) {
+        const option = document.createElement("option");
+        option.value = year;
+        option.textContent = year;
+        yearSelect.appendChild(option);
+      }
+
+      if (prevValue && parseInt(prevValue) >= minYear && parseInt(prevValue) <= currentYear) {
+        yearSelect.value = prevValue;
+      } else {
+        fundReturnState.selectedDate.year = null;
+      }
+
+      rebuildMonthOptions();
+    }
+
+    function rebuildMonthOptions() {
+      const prevValue = monthSelect.value;
+      monthSelect.innerHTML = '<option value="">월</option>';
+
+      if (!fundInceptionDate || !yearSelect.value) {
+        monthSelect.disabled = true;
+        fundReturnState.selectedDate.month = null;
+        return;
+      }
+
+      monthSelect.disabled = false;
+      const selectedYear = parseInt(yearSelect.value);
+      const minMonth = selectedYear === fundInceptionDate.year ? fundInceptionDate.month : 1;
+      const maxMonth = selectedYear === currentYear ? lastCompletedMonth : 12;
+
+      for (let month = minMonth; month <= maxMonth; month++) {
+        const option = document.createElement("option");
+        option.value = month;
+        option.textContent = month.toString().padStart(2, "0");
+        monthSelect.appendChild(option);
+      }
+
+      // 이전 선택값이 여전히 유효하면 유지, 아니면 초기화
+      if (prevValue && parseInt(prevValue) >= minMonth && parseInt(prevValue) <= maxMonth) {
+        monthSelect.value = prevValue;
+      } else {
+        fundReturnState.selectedDate.month = null;
+      }
+    }
+
+    yearSelect.addEventListener("change", (e) => {
+      fundReturnState.selectedDate.year = e.target.value ? parseInt(e.target.value) : null;
+      rebuildMonthOptions();
+      updateConfirmButtonState();
+      saveFilterState();
+    });
+
+    monthSelect.addEventListener("change", (e) => {
+      fundReturnState.selectedDate.month = e.target.value ? parseInt(e.target.value) : null;
+      updateConfirmButtonState();
+      saveFilterState();
+    });
+
+    // 확인 버튼 활성/비활성 판단
+    function updateConfirmButtonState() {
+      const btn = document.getElementById("btn-confirm");
+
+      const basicComplete =
+        fundReturnState.selectedDate.year &&
+        fundReturnState.selectedDate.month &&
+        fundReturnState.selectedFund &&
+        fundReturnState.fxOption &&
+        fundReturnState.markupOption;
+
+      // REALIZED/UNREALIZED은 항상 SPOT 환율을 사용하므로, 투자금액 계산 방식과 무관하게 항상 입력 필요
+      const spotComplete =
+        fundReturnState.fundCurrencies.length === 0 ||
+        fundReturnState.fundCurrencies.every(
+          (c) => fundReturnState.fxRates[c] !== undefined && fundReturnState.fxRates[c] > 0
+        );
+
+      btn.disabled = !(basicComplete && spotComplete);
+    }
+
+    // 확인 버튼 클릭 -> Investment Overview 조회
+    document.getElementById("btn-confirm").addEventListener("click", async (e) => {
+      // 클릭 즉시 비활성화하여 "현재 화면 = 이 설정값이 적용된 상태"임을 표시
+      e.target.disabled = true;
+
+      lastConfirmedParams = {
+        year: fundReturnState.selectedDate.year,
+        month: fundReturnState.selectedDate.month,
+        fund: fundReturnState.selectedFund,
+        fx_option: fundReturnState.fxOption,
+        fx_rates: { ...fundReturnState.fxRates },
+        markup_option: fundReturnState.markupOption,
+      };
+
+      document.getElementById("fund-return-result").style.display = "none";
+      document.getElementById("fund-metrics").style.display = "block";
+      document.getElementById("investment-overview").style.display = "block";
+      document.getElementById("fund-cashflow").style.display = "block";
+
+      await Promise.all([loadFundMetrics(), loadInvestmentOverview(), loadFundCashFlow()]);
+    });
+
+    // 투자통화 / 펀드통화 토글 (스위치)
+    document.getElementById("currency-switch").addEventListener("change", (e) => {
+      setDisplayCurrencyMode(e.target.checked ? "FUND" : "NATIVE");
+    });
+
+    // Net / Gross 토글 (스위치) - Fund Expense 포함 여부
+    document.getElementById("cashflow-mode-switch").addEventListener("change", (e) => {
+      cashflowMode = e.target.checked ? "GROSS" : "NET";
+      document.getElementById("label-net").classList.toggle("active", cashflowMode === "NET");
+      document.getElementById("label-gross").classList.toggle("active", cashflowMode === "GROSS");
+      renderCashFlowTable();
+    });
+
+    // 투자통화/펀드통화 둘 다 확인 버튼 클릭 시 한 번에 불러와서 캐시해두고, 토글은 재조회 없이 캐시만 바꿔치기합니다.
+    let overviewDataByMode = { NATIVE: null, FUND: null };
+
+    function setDisplayCurrencyMode(mode) {
+      displayCurrencyMode = mode;
+      document.getElementById("label-native").classList.toggle("active", mode === "NATIVE");
+      document.getElementById("label-fund").classList.toggle("active", mode === "FUND");
+      applyOverviewMode();
+    }
+
+    function applyOverviewMode() {
+      const cached = overviewDataByMode[displayCurrencyMode];
+      if (!cached) return;
+
+      const warningsEl = document.getElementById("overview-warnings");
+      overviewRows = cached.rows;
+      overviewFundCurrency = cached.fund_currency;
+      sortState = { key: null, dir: 1 };
+
+      warningsEl.innerHTML = cached.warnings && cached.warnings.length > 0
+        ? cached.warnings.map((w) => `<div class="overview-warning">⚠ ${w}</div>`).join("")
+        : "";
+
+      renderOverviewTable();
+    }
+
+    async function loadInvestmentOverview() {
+      const tableWrap = document.getElementById("overview-table-wrap");
+      const warningsEl = document.getElementById("overview-warnings");
+      tableWrap.innerHTML = '<p style="color: var(--gray); font-size: 13px;">불러오는 중...</p>';
+      warningsEl.innerHTML = "";
+
+      try {
+        const [nativeRes, fundRes] = await Promise.all([
+          fetch(`${API_BASE_URL}/investment-overview`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...lastConfirmedParams, display_currency: "NATIVE" }),
+          }),
+          fetch(`${API_BASE_URL}/investment-overview`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...lastConfirmedParams, display_currency: "FUND" }),
+          }),
+        ]);
+        const [nativeData, fundData] = await Promise.all([nativeRes.json(), fundRes.json()]);
+
+        if (nativeData.error || fundData.error) {
+          tableWrap.innerHTML = `<p style="color: #cc0000;">${nativeData.error || fundData.error}</p>`;
+          return;
+        }
+
+        overviewDataByMode = { NATIVE: nativeData, FUND: fundData };
+        applyOverviewMode();
+      } catch (err) {
+        console.error("Error loading investment overview:", err);
+        tableWrap.innerHTML = '<p style="color: #cc0000;">데이터를 불러오지 못했습니다.</p>';
+      }
+    }
+
+    function getOverviewAsOfLabel() {
+      if (!lastConfirmedParams) return "지분율(기준일)";
+      const m = String(lastConfirmedParams.month).padStart(2, "0");
+      return `지분율(${lastConfirmedParams.year}-${m} 기준)`;
+    }
+
+    // 국가/투자통화는 서로 동일 너비, 투자금액~지분율(8개 컬럼)은 서로 동일 너비로 맞춥니다
+    const OVERVIEW_COL_WIDTH = {
+      company_name: "16%",
+      company_country: "8%",
+      currency_inv: "8%",
+      date_inv: "9%",
+      amount_inv: "7.375%",
+      remaining_balance: "7.375%",
+      realized: "7.375%",
+      unrealized: "7.375%",
+      total_value: "7.375%",
+      moic: "7.375%",
+      ownership_investment_pct: "7.375%",
+      ownership_asof_pct: "7.375%",
+    };
+
+    function getOverviewColumns() {
+      return [
+        { key: "company_name", label: "기업명", type: "text" },
+        { key: "company_country", label: "국가", type: "text" },
+        { key: "currency_inv", label: "투자통화", type: "text" },
+        { key: "date_inv", label: "투자시점", type: "date" },
+        { key: "amount_inv", label: "투자금액", type: "currency" },
+        { key: "remaining_balance", label: "투자잔액", type: "currency" },
+        { key: "realized", label: "REALIZED", type: "currency" },
+        { key: "unrealized", label: "UNREALIZED", type: "currency" },
+        { key: "total_value", label: "TOTAL VALUE", type: "currency" },
+        { key: "moic", label: "MOIC", type: "moic" },
+        { key: "ownership_investment_pct", label: "지분율(투자당시)", type: "percent", estimatedKey: "ownership_investment_estimated" },
+        { key: "ownership_asof_pct", label: getOverviewAsOfLabel(), type: "percent", estimatedKey: "ownership_asof_estimated" },
+      ];
+    }
+
+    function renderOverviewTable() {
+      const tableWrap = document.getElementById("overview-table-wrap");
+
+      if (overviewRows.length === 0) {
+        tableWrap.innerHTML = '<p style="color: var(--gray); font-size: 13px;">해당 조건의 투자 건이 없습니다.</p>';
+        return;
+      }
+
+      const rows = [...overviewRows];
+      if (sortState.key) {
+        rows.sort((a, b) => {
+          let va = a[sortState.key];
+          let vb = b[sortState.key];
+          if (va === null || va === undefined) va = -Infinity;
+          if (vb === null || vb === undefined) vb = -Infinity;
+          if (typeof va === "string") {
+            return va.localeCompare(vb) * sortState.dir;
+          }
+          return (va - vb) * sortState.dir;
+        });
+      }
+
+      const columns = getOverviewColumns();
+
+      let html = "<table><thead><tr>";
+      columns.forEach((col) => {
+        const isSorted = sortState.key === col.key;
+        const arrow = isSorted ? (sortState.dir === 1 ? "▲" : "▼") : "▲▼";
+        const width = OVERVIEW_COL_WIDTH[col.key] || "";
+        html += `<th data-key="${col.key}" class="${isSorted ? "sorted" : ""}" style="width: ${width}">${col.label}<span class="sort-arrow">${arrow}</span></th>`;
+      });
+      html += "</tr></thead><tbody>";
+
+      rows.forEach((row) => {
+        html += "<tr>";
+        columns.forEach((col) => {
+          const val = row[col.key];
+          let cellContent;
+          let cellClass = "";
+
+          if (col.type === "text" || col.type === "date") {
+            cellContent = val || "-";
+          } else if (col.type === "currency") {
+            cellContent = formatCurrencyDisplay(val, row.display_currency);
+            cellClass = "num";
+          } else if (col.type === "moic") {
+            cellContent = formatMoic(val);
+            cellClass = "num";
+          } else if (col.type === "percent") {
+            cellContent = formatPercent(val, row[col.estimatedKey]);
+            cellClass = "num";
+          }
+
+          html += `<td class="${cellClass}">${cellContent}</td>`;
+        });
+        html += "</tr>";
+      });
+
+      // 펀드통화 모드에서만 합계 행 표시 (투자통화 모드는 행마다 통화가 섞여있어 합산 의미가 없음)
+      if (displayCurrencyMode === "FUND") {
+        html += '<tr class="overview-sum-row">';
+        columns.forEach((col, idx) => {
+          let cellContent = "-";
+          let cellClass = "";
+
+          if (idx === 0) {
+            cellContent = "합계";
+          } else if (col.type === "currency") {
+            const sum = rows.reduce((acc, r) => acc + (r[col.key] || 0), 0);
+            cellContent = formatCurrencyDisplay(sum, overviewFundCurrency);
+            cellClass = "num";
+          } else if (col.type === "moic") {
+            const sumTotalValue = rows.reduce((acc, r) => acc + (r.total_value || 0), 0);
+            const sumAmountInv = rows.reduce((acc, r) => acc + (r.amount_inv || 0), 0);
+            cellContent = sumAmountInv ? formatMoic(sumTotalValue / sumAmountInv) : "-";
+            cellClass = "num";
+          } else if (col.type === "percent") {
+            cellClass = "num";
+          }
+
+          html += `<td class="${cellClass}">${cellContent}</td>`;
+        });
+        html += "</tr>";
+      }
+
+      html += "</tbody></table>";
+      tableWrap.innerHTML = html;
+
+      tableWrap.querySelectorAll("th").forEach((th) => {
+        th.addEventListener("click", () => {
+          const key = th.getAttribute("data-key");
+          if (sortState.key === key) {
+            sortState.dir *= -1;
+          } else {
+            sortState.key = key;
+            sortState.dir = 1;
+          }
+          renderOverviewTable();
+        });
+      });
+    }
+
+    // Export to Excel (원본 값 그대로, * 표기 제외)
+    document.getElementById("btn-export").addEventListener("click", () => {
+      if (overviewRows.length === 0) return;
+
+      const exportData = overviewRows.map((row) => ({
+        "기업명": row.company_name || "",
+        "국가": row.company_country || "",
+        "투자통화": row.currency_inv || "",
+        "표시통화": row.display_currency || "",
+        "투자시점": row.date_inv || "",
+        "투자금액": row.amount_inv,
+        "투자잔액": row.remaining_balance,
+        "REALIZED": row.realized,
+        "UNREALIZED": row.unrealized,
+        "TOTAL VALUE": row.total_value,
+        "MOIC": row.moic,
+        "지분율(투자당시)(%)": row.ownership_investment_pct,
+        [`${getOverviewAsOfLabel()}(%)`]: row.ownership_asof_pct,
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Investment Overview");
+
+      const fundLabel = lastConfirmedParams ? lastConfirmedParams.fund : "fund";
+      const dateLabel = lastConfirmedParams ? `${lastConfirmedParams.year}${String(lastConfirmedParams.month).padStart(2, "0")}` : "";
+      const modeLabel = displayCurrencyMode === "FUND" ? "펀드통화" : "투자통화";
+      XLSX.writeFile(wb, `펀드별투자현황_${fundLabel}_${dateLabel}_${modeLabel}.xlsx`);
+    });
+
+    // ===== Fund Metrics =====
+    function fmtPercent(value, decimals = 1) {
+      if (value === null || value === undefined) return "-";
+      return `${value.toFixed(decimals)}%`;
+    }
+
+    async function loadFundMetrics() {
+      try {
+        const res = await fetch(`${API_BASE_URL}/fund-metrics`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(lastConfirmedParams),
+        });
+        const data = await res.json();
+        if (data.error) {
+          console.error("Fund metrics error:", data.error);
+          return;
+        }
+
+        const currency = data.fund_currency;
+        const b = data.basics;
+        document.getElementById("fm-currency").textContent = b.currency || "-";
+        document.getElementById("fm-commitment").textContent = formatCurrencyDisplay(b.commitment_amount, currency);
+        document.getElementById("fm-target-irr").textContent = fmtPercent(b.target_irr);
+        document.getElementById("fm-date-sub").textContent = b.date_subscription || "-";
+        document.getElementById("fm-date-inception").textContent = b.date_inception || "-";
+        document.getElementById("fm-date-term").textContent = b.date_investment_termination || "-";
+        document.getElementById("fm-date-maturity").textContent = b.date_maturity || "-";
+
+        const p = data.performance;
+        document.getElementById("fm-nav").textContent = formatCurrencyDisplay(p.nav, currency);
+        document.getElementById("fm-moic-gross").textContent = formatMoic(p.moic_gross);
+        document.getElementById("fm-moic-net").textContent = formatMoic(p.moic_net);
+        document.getElementById("fm-irr-gross").textContent = fmtPercent(p.irr_gross, 2);
+        document.getElementById("fm-irr-net").textContent = fmtPercent(p.irr_net, 2);
+
+        const dep = data.deployment;
+        document.getElementById("fm-capital-called").textContent = formatCurrencyDisplay(dep.capital_called, currency);
+        document.getElementById("fm-invested").textContent = formatCurrencyDisplay(dep.invested, currency);
+        document.getElementById("fm-fund-expense").textContent = formatCurrencyDisplay(dep.fund_expense, currency);
+        document.getElementById("fm-remaining-excl").textContent = formatCurrencyDisplay(dep.remaining_commitment_excl_fee, currency);
+        document.getElementById("fm-remaining-incl").textContent = formatCurrencyDisplay(dep.remaining_commitment_incl_fee, currency);
+        document.getElementById("fm-deployment-excl").textContent = fmtPercent(dep.deployment_rate_excl_fee);
+        document.getElementById("fm-deployment-incl").textContent = fmtPercent(dep.deployment_rate_incl_fee);
+
+        const inv = data.investment;
+        document.getElementById("fm-deal-count").textContent = inv.deal_count ?? "-";
+        document.getElementById("fm-portfolio-companies").textContent = inv.portfolio_companies ?? "-";
+        document.getElementById("fm-min-ticket").textContent = formatCurrencyDisplay(inv.min_ticket_size, currency);
+        document.getElementById("fm-avg-ticket").textContent = formatCurrencyDisplay(inv.avg_ticket_size, currency);
+        document.getElementById("fm-max-ticket").textContent = formatCurrencyDisplay(inv.max_ticket_size, currency);
+        document.getElementById("fm-avg-ownership").textContent = fmtPercent(inv.avg_ownership, 2);
+
+        const r = data.realization;
+        document.getElementById("fm-total-realized").textContent = formatCurrencyDisplay(r.total, currency);
+        document.getElementById("fm-onmarket").textContent = formatCurrencyDisplay(r.onmarket, currency);
+        document.getElementById("fm-offmarket").textContent = formatCurrencyDisplay(r.offmarket, currency);
+        document.getElementById("fm-interest").textContent = formatCurrencyDisplay(r.interest, currency);
+
+        const h = data.hedge;
+        document.getElementById("fm-target-hedge").textContent = fmtPercent(h.target_rate);
+        const hedgeContainer = document.getElementById("fm-hedge-by-currency");
+        hedgeContainer.innerHTML = "";
+        Object.entries(h.by_currency).forEach(([hedgeCurrency, ratio]) => {
+          const row = document.createElement("div");
+          row.className = "metric-row item";
+          row.innerHTML = `<span>${hedgeCurrency} 헤지율</span><span class="value">${fmtPercent(ratio)}</span>`;
+          hedgeContainer.appendChild(row);
+        });
+        document.getElementById("fm-settlement-gain-only").textContent = formatCurrencyDisplay(h.settlement_gain, currency);
+        document.getElementById("fm-settlement-loss-only").textContent = formatCurrencyDisplay(h.settlement_loss, currency);
+      } catch (err) {
+        console.error("Error loading fund metrics:", err);
+      }
+    }
+
+    // ===== Fund Cash Flow =====
+    async function loadFundCashFlow() {
+      const tableWrap = document.getElementById("cashflow-table-wrap");
+      const warningsEl = document.getElementById("cashflow-warnings");
+      tableWrap.innerHTML = '<p style="color: var(--gray); font-size: 13px;">불러오는 중...</p>';
+      warningsEl.innerHTML = "";
+
+      try {
+        const res = await fetch(`${API_BASE_URL}/fund-cashflow`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(lastConfirmedParams),
+        });
+        const data = await res.json();
+
+        if (data.error) {
+          tableWrap.innerHTML = `<p style="color: #cc0000;">${data.error}</p>`;
+          return;
+        }
+
+        cashflowRows = data.rows;
+        cashflowFundCurrency = data.fund_currency;
+        cashflowSortState = { key: "date", dir: 1 };
+        document.getElementById("cashflow-title").textContent = `Fund Cash Flow(${cashflowFundCurrency})`;
+
+        if (data.warnings && data.warnings.length > 0) {
+          warningsEl.innerHTML = data.warnings
+            .map((w) => `<div class="overview-warning">⚠ ${w}</div>`)
+            .join("");
+        }
+
+        renderCashFlowTable();
+      } catch (err) {
+        console.error("Error loading fund cash flow:", err);
+        tableWrap.innerHTML = '<p style="color: #cc0000;">데이터를 불러오지 못했습니다.</p>';
+      }
+    }
+
+    function formatCashFlowAmount(value, currency) {
+      if (value === null || value === undefined) return "-";
+      const sign = value < 0 ? "-" : "+";
+      return sign + formatCurrencyDisplay(Math.abs(value), currency);
+    }
+
+    const CASHFLOW_COLUMNS = [
+      { key: "date", label: "Date", type: "date" },
+      { key: "amount", label: "Cash In(Out)", type: "currency" },
+      { key: "note", label: "Note", type: "text" },
+    ];
+
+    function getVisibleCashFlowRows() {
+      // GROSS: Fund Expense 전체 제외, NET: 다 포함
+      return cashflowMode === "GROSS" ? cashflowRows.filter((r) => r.type !== "expense") : cashflowRows;
+    }
+
+    function renderCashFlowTable() {
+      const tableWrap = document.getElementById("cashflow-table-wrap");
+      const visibleRows = getVisibleCashFlowRows();
+
+      if (visibleRows.length === 0) {
+        tableWrap.innerHTML = '<p style="color: var(--gray); font-size: 13px;">해당 조건의 현금흐름이 없습니다.</p>';
+        return;
+      }
+
+      const rows = [...visibleRows];
+      if (cashflowSortState.key) {
+        rows.sort((a, b) => {
+          let va = a[cashflowSortState.key];
+          let vb = b[cashflowSortState.key];
+          if (va === null || va === undefined) va = -Infinity;
+          if (vb === null || vb === undefined) vb = -Infinity;
+          if (typeof va === "string") {
+            return va.localeCompare(vb) * cashflowSortState.dir;
+          }
+          return (va - vb) * cashflowSortState.dir;
+        });
+      }
+
+      let html = "<table><thead><tr>";
+      CASHFLOW_COLUMNS.forEach((col) => {
+        const isSorted = cashflowSortState.key === col.key;
+        const arrow = isSorted ? (cashflowSortState.dir === 1 ? "▲" : "▼") : "▲▼";
+        html += `<th data-key="${col.key}" class="${isSorted ? "sorted" : ""}">${col.label}<span class="sort-arrow">${arrow}</span></th>`;
+      });
+      html += "</tr></thead><tbody>";
+
+      rows.forEach((row) => {
+        html += "<tr>";
+        CASHFLOW_COLUMNS.forEach((col) => {
+          const val = row[col.key];
+          let cellContent;
+          let cellClass = "";
+
+          if (col.type === "text" || col.type === "date") {
+            cellContent = val || "-";
+          } else if (col.type === "currency") {
+            cellContent = formatCashFlowAmount(val, cashflowFundCurrency);
+            cellClass = "num";
+          }
+
+          html += `<td class="${cellClass}">${cellContent}</td>`;
+        });
+        html += "</tr>";
+      });
+
+      html += "</tbody></table>";
+      tableWrap.innerHTML = html;
+
+      tableWrap.querySelectorAll("th").forEach((th) => {
+        th.addEventListener("click", () => {
+          const key = th.getAttribute("data-key");
+          if (cashflowSortState.key === key) {
+            cashflowSortState.dir *= -1;
+          } else {
+            cashflowSortState.key = key;
+            cashflowSortState.dir = 1;
+          }
+          renderCashFlowTable();
+        });
+      });
+    }
+
+    // Export to Excel (Investment Overview와 동일한 파일명 규칙 적용, 현재 Net/Gross 화면에 맞춰 내보냄)
+    document.getElementById("btn-export-cashflow").addEventListener("click", () => {
+      const visibleRows = getVisibleCashFlowRows();
+      if (visibleRows.length === 0) return;
+
+      const exportData = visibleRows.map((row) => ({
+        "Date": row.date || "",
+        "Cash In(Out)": row.amount,
+        "Note": row.note || "",
+      }));
+
+      const ws = XLSX.utils.json_to_sheet(exportData);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Fund Cash Flow");
+
+      const fundLabel = lastConfirmedParams ? lastConfirmedParams.fund : "fund";
+      const dateLabel = lastConfirmedParams ? `${lastConfirmedParams.year}${String(lastConfirmedParams.month).padStart(2, "0")}` : "";
+      const modeLabel = cashflowMode === "GROSS" ? "Gross" : "Net";
+      XLSX.writeFile(wb, `펀드현금흐름_${fundLabel}_${dateLabel}_${modeLabel}.xlsx`);
+    });
+
+    // 펀드 수익률 탭 초기화 (펀드 목록 로드 후 저장된 필터 상태 복원)
+    initFundReturnTab().then(restoreFilterState).then(initVerificationControls);
+
+    // 검증 탭: FUND 선택 + 그 펀드 설정일 기준 기간(연/월) 선택 (펀드별 수익률 탭과 동일한 규칙 재사용)
+    let verifyFundInceptionDate = null;
+
+    function initVerificationControls() {
+      const fundSelect = document.getElementById("verify-select-fund");
+      fundSelect.innerHTML = '<option value="">펀드 선택</option>';
+      fundList.forEach((fund) => {
+        const option = document.createElement("option");
+        option.value = fund.nickname;
+        option.textContent = fund.nickname;
+        fundSelect.appendChild(option);
+      });
+    }
+
+    function rebuildVerifyYearOptions() {
+      const yearSelect = document.getElementById("verify-select-year");
+      const monthSelect = document.getElementById("verify-select-month");
+      const prevValue = yearSelect.value;
+      yearSelect.innerHTML = '<option value="">연도</option>';
+
+      if (!verifyFundInceptionDate) {
+        yearSelect.disabled = true;
+        monthSelect.disabled = true;
+        monthSelect.innerHTML = '<option value="">월</option>';
+        return;
+      }
+
+      yearSelect.disabled = false;
+      const minYear = verifyFundInceptionDate.year;
+      for (let year = currentYear; year >= minYear; year--) {
+        const option = document.createElement("option");
+        option.value = year;
+        option.textContent = year;
+        yearSelect.appendChild(option);
+      }
+
+      if (prevValue && parseInt(prevValue) >= minYear && parseInt(prevValue) <= currentYear) {
+        yearSelect.value = prevValue;
+      }
+
+      rebuildVerifyMonthOptions();
+    }
+
+    function rebuildVerifyMonthOptions() {
+      const yearSelect = document.getElementById("verify-select-year");
+      const monthSelect = document.getElementById("verify-select-month");
+      const prevValue = monthSelect.value;
+      monthSelect.innerHTML = '<option value="">월</option>';
+
+      if (!verifyFundInceptionDate || !yearSelect.value) {
+        monthSelect.disabled = true;
+        return;
+      }
+
+      monthSelect.disabled = false;
+      const selectedYear = parseInt(yearSelect.value);
+      const minMonth = selectedYear === verifyFundInceptionDate.year ? verifyFundInceptionDate.month : 1;
+      const maxMonth = selectedYear === currentYear ? lastCompletedMonth : 12;
+
+      for (let month = minMonth; month <= maxMonth; month++) {
+        const option = document.createElement("option");
+        option.value = month;
+        option.textContent = month.toString().padStart(2, "0");
+        monthSelect.appendChild(option);
+      }
+
+      if (prevValue && parseInt(prevValue) >= minMonth && parseInt(prevValue) <= maxMonth) {
+        monthSelect.value = prevValue;
+      }
+    }
+
+    document.getElementById("verify-select-fund").addEventListener("change", (e) => {
+      const fundMeta = fundList.find((f) => f.nickname === e.target.value);
+      verifyFundInceptionDate = fundMeta ? parseYmd(fundMeta.inception) : null;
+      rebuildVerifyYearOptions();
+    });
+
+    document.getElementById("verify-select-year").addEventListener("change", rebuildVerifyMonthOptions);
+
+    // 검증 탭: 통합자산운용시스템 Cash Flow 업로드 -> Column C(금액) 음수 합계를
+    // SUM(DIRECT_INVESTMENT.AMOUNT_INV) + SUM(FUND_EXPENSE.AMOUNT_EXP)와 대조
+    async function verifyCashflowUpload(file) {
+      const resultEl = document.getElementById("verify-result-cashflow-system");
+      const fundNickname = document.getElementById("verify-select-fund").value;
+      const year = document.getElementById("verify-select-year").value;
+      const month = document.getElementById("verify-select-month").value;
+
+      if (!fundNickname || !year || !month) {
+        resultEl.innerHTML = '<span style="color: #cc0000;">먼저 FUND와 기간을 선택하세요.</span>';
+        return;
+      }
+
+      resultEl.textContent = "확인 중...";
+
+      try {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+        const headerRow = rows[0] || [];
+        let colIdx = headerRow.findIndex((cell) => String(cell || "").trim() === "금액");
+        if (colIdx === -1) colIdx = 2; // 헤더에서 못 찾으면 3번째 컬럼(C열)으로 대체
+
+        let negativeSum = 0;
+        for (let i = 1; i < rows.length; i++) {
+          const val = rows[i][colIdx];
+          if (typeof val === "number" && val < 0) {
+            negativeSum += val;
+          }
+        }
+        const uploadedTotal = Math.abs(negativeSum);
+
+        const res = await fetch(`${API_BASE_URL}/verify-cashflow`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fund: fundNickname, year: parseInt(year), month: parseInt(month) }),
+        });
+        const data = await res.json();
+
+        if (data.error) {
+          resultEl.innerHTML = `<span style="color: #cc0000;">${data.error}</span>`;
+          return;
+        }
+
+        // 원 단위로 정확히 일치하는지 확인 (부동소수점 표현 오차 제거를 위해 정수 반올림 후 비교)
+        const uploadedRounded = Math.round(uploadedTotal);
+        const expectedRounded = Math.round(data.total_cost);
+        const diff = uploadedRounded - expectedRounded;
+
+        const uploadedLabel = uploadedRounded.toLocaleString("ko-KR") + "원";
+        const expectedLabel = expectedRounded.toLocaleString("ko-KR") + "원";
+
+        if (diff === 0) {
+          resultEl.innerHTML = `<span style="color: #007a00;">✓ 일치 (업로드: ${uploadedLabel} / 계산값: ${expectedLabel})</span>`;
+        } else {
+          const diffLabel = Math.abs(diff).toLocaleString("ko-KR") + "원";
+          resultEl.innerHTML = `<span style="color: #cc0000;">✗ 불일치 (업로드: ${uploadedLabel} / 계산값: ${expectedLabel} / 차이: ${diffLabel})</span>`;
+        }
+      } catch (err) {
+        console.error("Error verifying cash flow:", err);
+        resultEl.innerHTML = '<span style="color: #cc0000;">파일을 확인하지 못했습니다.</span>';
+      }
+    }
+
+    // 검증 탭: HINTS 신탁재산명세부 업로드 -> Column E(종목코드/HINTS_ID) -> Column G(액면/주수)를
+    // DIRECT_INVESTMENT.HINTS_ID로 매칭해서 DIRECT_HOLDINGS.SHARES_HELD와 대조 (HINTS_ID가 "N/A"인 건 제외)
+    async function verifySharesUpload(file) {
+      const resultEl = document.getElementById("verify-result-hints");
+      const fundNickname = document.getElementById("verify-select-fund").value;
+      const year = document.getElementById("verify-select-year").value;
+      const month = document.getElementById("verify-select-month").value;
+
+      if (!fundNickname || !year || !month) {
+        resultEl.innerHTML = '<span style="color: #cc0000;">먼저 FUND와 기간을 선택하세요.</span>';
+        return;
+      }
+
+      resultEl.textContent = "확인 중...";
+
+      try {
+        const buffer = await file.arrayBuffer();
+        const workbook = XLSX.read(buffer, { type: "array" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+        // Column E(index 4) = 종목코드(HINTS_ID), Column G(index 6) = 액면/주수(보유주수)
+        const uploadedShares = {};
+        for (let i = 2; i < rows.length; i++) {
+          const hintsId = rows[i][4];
+          const shares = rows[i][6];
+          if (typeof hintsId === "string" && hintsId.trim() && typeof shares === "number") {
+            uploadedShares[hintsId.trim()] = shares;
+          }
+        }
+
+        const res = await fetch(`${API_BASE_URL}/verify-shares`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ fund: fundNickname, year: parseInt(year), month: parseInt(month) }),
+        });
+        const data = await res.json();
+
+        if (data.error) {
+          resultEl.innerHTML = `<span style="color: #cc0000;">${data.error}</span>`;
+          return;
+        }
+
+        let matchedCount = 0;
+        let tableHtml = '<table style="margin-top: 8px; font-size: 12px; width: auto;"><thead><tr>' +
+          '<th>기업명</th><th>HINTS_ID</th><th>우리 시스템</th><th>업로드 파일</th><th>결과</th></tr></thead><tbody>';
+
+        data.rows.forEach((row) => {
+          const ours = row.shares_held !== null ? Math.round(row.shares_held) : null;
+          const uploaded = Object.prototype.hasOwnProperty.call(uploadedShares, row.hints_id)
+            ? Math.round(uploadedShares[row.hints_id])
+            : null;
+          const isMatch = ours !== null && uploaded !== null && ours === uploaded;
+          if (isMatch) matchedCount++;
+
+          tableHtml += `<tr>
+            <td>${row.company_name}</td>
+            <td>${row.hints_id}</td>
+            <td style="text-align: right;">${ours !== null ? ours.toLocaleString("ko-KR") : "-"}</td>
+            <td style="text-align: right;">${uploaded !== null ? uploaded.toLocaleString("ko-KR") : "-"}</td>
+            <td>${isMatch ? "✓" : "✗"}</td>
+          </tr>`;
+        });
+
+        tableHtml += "</tbody></table>";
+
+        const allMatch = matchedCount === data.rows.length;
+        const summary = allMatch
+          ? `<span style="color: #007a00;">✓ 전체 일치 (${matchedCount}/${data.rows.length})</span>`
+          : `<span style="color: #cc0000;">✗ 불일치 있음 (${matchedCount}/${data.rows.length} 일치)</span>`;
+
+        resultEl.innerHTML = summary + tableHtml;
+      } catch (err) {
+        console.error("Error verifying shares:", err);
+        resultEl.innerHTML = '<span style="color: #cc0000;">파일을 확인하지 못했습니다.</span>';
+      }
+    }
+
+    // 검증 탭: 파일 선택 시 파일명 표시
+    document.getElementById("upload-cashflow-system").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      document.getElementById("file-name-cashflow-system").textContent = file ? file.name : "";
+      if (file) verifyCashflowUpload(file);
+    });
+
+    document.getElementById("upload-hints").addEventListener("change", (e) => {
+      const file = e.target.files[0];
+      document.getElementById("file-name-hints").textContent = file ? file.name : "";
+      if (file) verifySharesUpload(file);
+    });
+
+    // Tab switching (마지막으로 본 탭을 기억해서 새로고침해도 유지)
+    const ACTIVE_TAB_KEY = "tr_active_tab";
+
+    function switchTab(tabName) {
+      document.querySelectorAll(".tab-btn").forEach((b) => b.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach((c) => c.classList.remove("active"));
+
+      document.querySelector(`.tab-btn[data-tab="${tabName}"]`).classList.add("active");
+      document.getElementById(tabName).classList.add("active");
+      localStorage.setItem(ACTIVE_TAB_KEY, tabName);
+    }
+
+    document.querySelectorAll(".tab-btn").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        switchTab(btn.getAttribute("data-tab"));
+      });
+    });
+
+    const savedTab = localStorage.getItem(ACTIVE_TAB_KEY);
+    if (savedTab && document.getElementById(savedTab)) {
+      switchTab(savedTab);
+    }
+
+    if (sessionStorage.getItem("tr_unlocked") === "1") {
+      lockScreen.style.display = "none";
+      app.style.display = "block";
+    }
+  </script>
+</body>
+</html>

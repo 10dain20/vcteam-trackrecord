@@ -1,0 +1,9 @@
+secrets/
+*.json
+!.claude/*.json
+
+# 실제 펀드/투자 데이터가 담긴 작업 파일 - 저장소에는 코드만 포함
+*.xlsx
+.DS_Store
+__pycache__/
+*.pyc
