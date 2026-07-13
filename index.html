@@ -1302,8 +1302,8 @@
         input.placeholder = "환율 입력";
         input.min = "0";
 
-        // 이전에 입력했던 SPOT 환율을 기억해서 제안 (localStorage)
-        const remembered = localStorage.getItem(`fx_spot_rate_${currency}`);
+        // 이전에 입력했던 SPOT 환율을 기억해서 제안 (sessionStorage - 탭/창을 닫으면 사라짐)
+        const remembered = sessionStorage.getItem(`fx_spot_rate_${currency}`);
         if (remembered) {
           input.value = remembered;
           fundReturnState.fxRates[currency] = parseFloat(remembered);
@@ -1315,7 +1315,7 @@
             delete fundReturnState.fxRates[currency];
           } else {
             fundReturnState.fxRates[currency] = val;
-            localStorage.setItem(`fx_spot_rate_${currency}`, val);
+            sessionStorage.setItem(`fx_spot_rate_${currency}`, val);
           }
           updateConfirmButtonState();
         });
