@@ -1234,6 +1234,13 @@
       }
     }
 
+    // 경고 메시지에 투자건명/비고 등 시트 원문이 섞여 들어가므로 innerHTML 삽입 전 이스케이프합니다.
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = String(str);
+      return div.innerHTML;
+    }
+
     function parseYmd(str) {
       if (!str) return null;
       const parts = String(str).split("-");
@@ -1574,7 +1581,7 @@
       sortState = { key: null, dir: 1 };
 
       warningsEl.innerHTML = cached.warnings && cached.warnings.length > 0
-        ? cached.warnings.map((w) => `<div class="overview-warning">⚠ ${w}</div>`).join("")
+        ? cached.warnings.map((w) => `<div class="overview-warning">⚠ ${escapeHtml(w)}</div>`).join("")
         : "";
 
       renderOverviewTable();
@@ -1888,7 +1895,7 @@
 
         if (data.warnings && data.warnings.length > 0) {
           warningsEl.innerHTML = data.warnings
-            .map((w) => `<div class="overview-warning">⚠ ${w}</div>`)
+            .map((w) => `<div class="overview-warning">⚠ ${escapeHtml(w)}</div>`)
             .join("");
         }
 
