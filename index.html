@@ -295,6 +295,22 @@
     white-space: nowrap;
   }
 
+  .info-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 13px;
+    height: 13px;
+    border-radius: 50%;
+    border: 1px solid var(--gray);
+    color: var(--gray);
+    font-size: 9px;
+    font-weight: 700;
+    font-style: normal;
+    cursor: help;
+    margin-left: 3px;
+  }
+
   .inline-controls select {
     padding: 6px 8px;
     font-family: inherit;
@@ -809,6 +825,17 @@
               <label><input type="radio" name="fx-option" value="SPOT"> SPOT환율</label>
             </div>
 
+            <div class="divider" id="fx-other-divider" style="display: none;"></div>
+
+            <!-- 펀드 통화가 KRW가 아닌데 집행환율을 선택한 경우, 비용/분배(FUND_EXPENSE/FUND_DISTRIBUTION)는 CALL_ID가 없어 집행환율을 적용할 수 없으므로 대체 방식 선택 필요 -->
+            <div id="fx-other-group" style="display: none;">
+              <span class="field-label">대체 환율<i class="info-icon" title="실거래 환율이 없는 경우 적용 환율을 사용하여 환산">i</i></span>
+              <div class="radio-group">
+                <label><input type="radio" name="fx-option-other" value="BASE"> 약정일환율</label>
+                <label><input type="radio" name="fx-option-other" value="SPOT"> SPOT환율</label>
+              </div>
+            </div>
+
             <div class="divider"></div>
 
             <span class="field-label">MARKUP</span>
@@ -1072,7 +1099,9 @@
       selectedFund: null,
       selectedFundNickname: null,
       fundCurrencies: [], // 해당 펀드의 집행 통화들
+      fundBaseCurrency: "KRW", // 해당 펀드의 FUND_CURRENCY (약정 통화)
       fxOption: null, // "EXECUTED", "BASE", "SPOT"
+      fxOptionOther: null, // "BASE", "SPOT" - 집행환율 선택 시 비용/분배 환산에 사용할 대체 방식
       fxRates: {}, // { "USD": 1200, "EUR": 1500 } 형태
       markupOption: null, // "ACTUAL", "EXPECTED"
     };
@@ -1124,6 +1153,7 @@
         year: fundReturnState.selectedDate.year || null,
         month: fundReturnState.selectedDate.month || null,
         fxOption: fundReturnState.fxOption || null,
+        fxOptionOther: fundReturnState.fxOptionOther || null,
         markupOption: fundReturnState.markupOption || null,
       }));
     }
@@ -1160,6 +1190,15 @@
         if (radio) {
           radio.checked = true;
           fundReturnState.fxOption = state.fxOption;
+          updateFxOtherVisibility();
+
+          if (isFxOtherRequired() && state.fxOptionOther) {
+            const otherRadio = document.querySelector(`input[name="fx-option-other"][value="${state.fxOptionOther}"]`);
+            if (otherRadio) {
+              otherRadio.checked = true;
+              fundReturnState.fxOptionOther = state.fxOptionOther;
+            }
+          }
         }
       }
 
@@ -1217,9 +1256,10 @@
       if (fundNickname) {
         try {
           const res = await fetch(`${API_BASE_URL}/currencies?fund=${encodeURIComponent(fundNickname)}`);
-          const currencies = await res.json();
+          const data = await res.json();
 
-          fundReturnState.fundCurrencies = currencies;
+          fundReturnState.fundCurrencies = data.currencies;
+          fundReturnState.fundBaseCurrency = data.fund_currency || "KRW";
           fundReturnState.fxRates = {};
 
           // REALIZED/UNREALIZED은 항상 SPOT 환율을 사용하므로, 투자금액 계산 방식과 무관하게 항상 입력 필요
@@ -1230,11 +1270,29 @@
           console.error("Error fetching currencies:", err);
         }
       } else {
+        fundReturnState.fundBaseCurrency = "KRW";
         document.getElementById("fx-spot-inputs").style.display = "none";
         document.getElementById("fx-spot-divider").style.display = "none";
       }
 
+      updateFxOtherVisibility();
       updateConfirmButtonState();
+    }
+
+    // 펀드 통화(FUND_CURRENCY)가 KRW가 아니고 투자금 기준이 집행환율일 때만 "대체 환율"이 필요
+    // (FUND_EXPENSE/FUND_DISTRIBUTION은 CALL_ID가 없어 집행환율로는 KRW 외 펀드 통화로 환산할 방법이 없기 때문)
+    function isFxOtherRequired() {
+      return fundReturnState.fxOption === "EXECUTED" && fundReturnState.fundBaseCurrency !== "KRW";
+    }
+
+    function updateFxOtherVisibility() {
+      const show = isFxOtherRequired();
+      document.getElementById("fx-other-group").style.display = show ? "flex" : "none";
+      document.getElementById("fx-other-divider").style.display = show ? "block" : "none";
+      if (!show) {
+        fundReturnState.fxOptionOther = null;
+        document.querySelectorAll('input[name="fx-option-other"]').forEach((r) => (r.checked = false));
+      }
     }
 
     document.getElementById("select-fund").addEventListener("change", async (e) => {
@@ -1246,6 +1304,16 @@
     document.querySelectorAll('input[name="fx-option"]').forEach((radio) => {
       radio.addEventListener("change", (e) => {
         fundReturnState.fxOption = e.target.value;
+        updateFxOtherVisibility();
+        updateConfirmButtonState();
+        saveFilterState();
+      });
+    });
+
+    // 비용/분배 환산 방식(BASE/SPOT) 변경 - 집행환율 선택 시에만 사용됩니다
+    document.querySelectorAll('input[name="fx-option-other"]').forEach((radio) => {
+      radio.addEventListener("change", (e) => {
+        fundReturnState.fxOptionOther = e.target.value;
         updateConfirmButtonState();
         saveFilterState();
       });
@@ -1437,6 +1505,7 @@
         fundReturnState.selectedDate.month &&
         fundReturnState.selectedFund &&
         fundReturnState.fxOption &&
+        (!isFxOtherRequired() || fundReturnState.fxOptionOther) &&
         fundReturnState.markupOption;
 
       // REALIZED/UNREALIZED은 항상 SPOT 환율을 사용하므로, 투자금액 계산 방식과 무관하게 항상 입력 필요
@@ -1459,6 +1528,7 @@
         month: fundReturnState.selectedDate.month,
         fund: fundReturnState.selectedFund,
         fx_option: fundReturnState.fxOption,
+        fx_option_other: fundReturnState.fxOption === "EXECUTED" ? fundReturnState.fxOptionOther : null,
         fx_rates: { ...fundReturnState.fxRates },
         markup_option: fundReturnState.markupOption,
       };

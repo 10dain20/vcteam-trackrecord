@@ -264,27 +264,30 @@ def get_funds():
 
 @app.route('/api/currencies', methods=['GET'])
 def get_currencies():
-    """선택된 펀드의 집행 통화를 반환합니다."""
+    """선택된 펀드의 집행 통화와 펀드 통화(FUND_CURRENCY)를 반환합니다."""
     fund_nickname = request.args.get('fund')
 
     if not fund_nickname:
-        return jsonify([])
+        return jsonify({"currencies": [], "fund_currency": "KRW"})
 
     fund_code = get_fund_code_from_nickname(fund_nickname)
     if not fund_code:
-        return jsonify([])
+        return jsonify({"currencies": [], "fund_currency": "KRW"})
+
+    fund_info = get_fund_info(fund_code)
+    fund_currency = (fund_info.get("FUND_CURRENCY") if fund_info else None) or "KRW"
 
     data = get_sheet_data("DIRECT_INVESTMENT")
 
     if not data or len(data) < 1:
-        return jsonify([])
+        return jsonify({"currencies": [], "fund_currency": fund_currency})
 
     headers = data[0]
     fund_code_idx = get_column_index(headers, "FUND_CODE")
     currency_idx = get_column_index(headers, "CURRENCY_INV")
 
     if fund_code_idx == -1 or currency_idx == -1:
-        return jsonify([])
+        return jsonify({"currencies": [], "fund_currency": fund_currency})
 
     currencies = set()
     for row in data[1:]:
@@ -294,7 +297,7 @@ def get_currencies():
                 if currency and currency != "KRW":
                     currencies.add(currency)
 
-    return jsonify(sorted(list(currencies)))
+    return jsonify({"currencies": sorted(list(currencies)), "fund_currency": fund_currency})
 
 
 @app.route('/api/fund-base-fx', methods=['GET'])
@@ -824,7 +827,7 @@ def fund_cashflow():
     """
     Fund Cash Flow (LP 관점의 펀드 현금흐름)를 계산합니다.
 
-    Request body: /api/investment-overview와 동일 (year, month, fund, fx_option, fx_rates, markup_option)
+    Request body: /api/investment-overview와 동일 + fx_option_other (year, month, fund, fx_option, fx_option_other, fx_rates, markup_option)
 
     - Cash Out(-): DIRECT_INVESTMENT(투자 집행), FUND_EXPENSE(펀드 비용)
     - Cash In(+): FUND_DISTRIBUTION(분배), Fund NAV
@@ -832,6 +835,8 @@ def fund_cashflow():
       REALIZED된 금액도 아직 실제로 수익자에게 분배되지 않았다는 전제 하에 포함합니다.)
 
     모든 금액은 펀드 통화(FUND_CURRENCY) 기준이며, 선택한 fx_option(EXECUTED/BASE/SPOT)으로 환산합니다.
+    단, FUND_EXPENSE/FUND_DISTRIBUTION은 CALL_ID가 없어 EXECUTED를 적용할 수 없으므로,
+    fx_option이 EXECUTED이면 fx_option_other(BASE/SPOT)로 대신 환산합니다.
     """
     clear_data_caches()  # 확인 버튼 클릭 시마다 Google Sheets에서 최신 데이터를 다시 읽어옴
     params = request.json or {}
@@ -842,6 +847,10 @@ def fund_cashflow():
     fx_option = params.get('fx_option')
     fx_rates = params.get('fx_rates', {}) or {}
     markup_option = params.get('markup_option', 'ACTUAL')
+
+    # FUND_EXPENSE/FUND_DISTRIBUTION은 CALL_ID가 없어 집행환율(EXECUTED)을 적용할 수 없으므로,
+    # 집행환율 선택 시에는 별도로 지정한 대체 방식(BASE/SPOT)을 사용합니다.
+    other_fx_option = params.get('fx_option_other') if fx_option == "EXECUTED" else fx_option
 
     fund_code = get_fund_code_from_nickname(fund_nickname)
     if not fund_code:
@@ -898,7 +907,7 @@ def fund_cashflow():
         exp_currency = (exp.get("CURRENCY_EXP") or "").strip() or fund_currency
         amount_exp = parse_number(exp.get("AMOUNT_EXP"))
         converted, warn = convert_amount(
-            amount_exp, exp_currency, fund_currency, fx_option, fx_rates, fund_code, None, as_of
+            amount_exp, exp_currency, fund_currency, other_fx_option, fx_rates, fund_code, None, as_of
         )
         if warn:
             warnings.add(warn)
@@ -922,7 +931,7 @@ def fund_cashflow():
         dist_currency = (dist.get("CURRENCY_DIST") or "").strip() or fund_currency
         amount_dist = parse_number(dist.get("AMOUNT_DIST"))
         converted, warn = convert_amount(
-            amount_dist, dist_currency, fund_currency, fx_option, fx_rates, fund_code, None, as_of
+            amount_dist, dist_currency, fund_currency, other_fx_option, fx_rates, fund_code, None, as_of
         )
         if warn:
             warnings.add(warn)
