@@ -177,6 +177,12 @@ def parse_number(value):
         return 0.0
 
 
+def has_value(value):
+    """빈 칸('', None, 공백)인지 여부. parse_number()는 빈 칸도 0.0으로 반환하므로,
+    '입력 안 함'과 '실제로 0'을 구분해야 하는 곳(전환/마크업 등)에서 사용합니다."""
+    return value is not None and str(value).strip() != ""
+
+
 def parse_date(value):
     """
     'YYYY-MM-DD' 문자열 또는 Google Sheets 일련번호(숫자, UNFORMATTED_VALUE로 조회 시 날짜 셀의 형태)를
@@ -541,11 +547,16 @@ def compute_and_write_holdings(fund_code, as_of):
                 (dc for dc in conversions_by_call.get(call_id, []) if dc[0] <= as_of),
                 key=lambda dc: dc[0],
             )
+            # 전환/마크업 행이 있어도 특정 칸(주수/단가 등)이 비어 있으면 "아직 확정 안 됨"으로 보고
+            # 직전 값(투자 단가 등)을 그대로 유지합니다 - 빈 칸을 parse_number()가 0으로 반환해
+            # 유효했던 원가를 0으로 덮어써버리는 것을 방지하기 위함입니다.
             for _, conv in call_conversions:
-                sec_type = (conv.get("SECURITY_TYPE_CONV") or "").strip()
+                sec_type = (conv.get("SECURITY_TYPE_CONV") or "").strip() or sec_type
                 currency = (conv.get("CURRENCY_CONV") or "").strip() or currency
-                shares = parse_number(conv.get("SHARES_CONV"))
-                price = parse_number(conv.get("PRICE_PER_SHARE_CONV"))
+                if has_value(conv.get("SHARES_CONV")):
+                    shares = parse_number(conv.get("SHARES_CONV"))
+                if has_value(conv.get("PRICE_PER_SHARE_CONV")):
+                    price = parse_number(conv.get("PRICE_PER_SHARE_CONV"))
 
             realized_shares = sum(
                 parse_number(r.get("SHARES_REAL"))
@@ -558,7 +569,8 @@ def compute_and_write_holdings(fund_code, as_of):
             if call_markups:
                 latest_markup = max(call_markups, key=lambda dm: dm[0])[1]
                 currency = (latest_markup.get("CURRENCY_MKA") or "").strip() or currency
-                price = parse_number(latest_markup.get("PRICE_PER_SHARE_MKA"))
+                if has_value(latest_markup.get("PRICE_PER_SHARE_MKA")):
+                    price = parse_number(latest_markup.get("PRICE_PER_SHARE_MKA"))
 
             updates[call_id] = (sec_type, shares, currency, price)
 
@@ -774,7 +786,9 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
             if call_conversions:
                 latest_conv = max(call_conversions, key=lambda dc: dc[0])[1]
                 cost_basis_currency = (latest_conv.get("CURRENCY_CONV") or "").strip() or cost_basis_currency
-                cost_basis_price = parse_number(latest_conv.get("PRICE_PER_SHARE_CONV"))
+                # PRICE_PER_SHARE_CONV가 비어 있으면 아직 확정 전이므로 투자 단가를 그대로 유지합니다.
+                if has_value(latest_conv.get("PRICE_PER_SHARE_CONV")):
+                    cost_basis_price = parse_number(latest_conv.get("PRICE_PER_SHARE_CONV"))
 
             remaining_target = cost_basis_currency if display_currency == "NATIVE" else fund_currency
             converted_remaining, remaining_warn = convert_amount(
