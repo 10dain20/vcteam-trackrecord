@@ -308,7 +308,9 @@ def get_currencies():
                             currencies.add(currency)
 
     # 약정통화(CURRENCY_SUB)가 펀드 통화와 다르면, FUND_SUBSCRIPTION은 CALL_ID가 없어
-    # 집행환율로는 환산할 수 없으므로 대체환율 선택이 필요합니다.
+    # 집행환율로는 환산할 수 없으므로 대체환율 선택이 필요합니다. Investment Overview는
+    # "펀드통화" 모드에서 약정통화를 타겟으로 쓰므로, 약정통화 자체가 KRW가 아니면 그 통화로
+    # 실거래 환율이 없는 투자건(KRW로 집행된 건 등)도 대체환율이 필요할 수 있습니다.
     needs_fx_other = fund_currency != "KRW"
     subscription_currency = None
     for s in get_sheet_dicts("FUND_SUBSCRIPTION"):
@@ -319,8 +321,9 @@ def get_currencies():
             subscription_currency = sub_currency
         if sub_currency != fund_currency:
             needs_fx_other = True
-            if sub_currency != "KRW":
-                currencies.add(sub_currency)
+        if sub_currency != "KRW":
+            needs_fx_other = True
+            currencies.add(sub_currency)
 
     return jsonify({
         "currencies": sorted(list(currencies)),
@@ -458,6 +461,28 @@ def format_fx_warnings(warnings):
         else:
             messages.append(f"{currency} 환율을 찾을 수 없습니다")
     return messages
+
+
+def get_subscription_currency(fund_code, fund_currency):
+    """이 펀드의 약정통화(FUND_SUBSCRIPTION.CURRENCY_SUB)를 반환합니다. 값이 없으면 펀드통화로 폴백합니다."""
+    for s in get_sheet_dicts("FUND_SUBSCRIPTION"):
+        if s.get("FUND_CODE") != fund_code:
+            continue
+        sub_currency = (s.get("CURRENCY_SUB") or "").strip()
+        if sub_currency:
+            return sub_currency
+    return fund_currency
+
+
+def convert_amount_with_fallback(amount, native_currency, target_currency, fx_option, fx_option_other, fx_rates, fund_code, call_id, as_of, label=None):
+    """
+    fx_option(주로 집행환율)으로 먼저 환산을 시도하고, 실패하면 대체환율(fx_option_other: BASE/SPOT)로
+    재시도합니다. CALL_ID는 있지만 그 통화 조합에 대한 실거래(집행) 환율이 없는 경우를 위한 것입니다.
+    """
+    converted, warn = convert_amount(amount, native_currency, target_currency, fx_option, fx_rates, fund_code, call_id, as_of, label=label)
+    if warn and fx_option == "EXECUTED" and fx_option_other and fx_option_other != fx_option:
+        converted, warn = convert_amount(amount, native_currency, target_currency, fx_option_other, fx_rates, fund_code, call_id, as_of, label=label)
+    return converted, warn
 
 
 def calculate_xirr(cashflows, guess=0.1):
@@ -634,6 +659,7 @@ def investment_overview():
         "month": 5,
         "fund": "군공",
         "fx_option": "SPOT" | "BASE" | "EXECUTED",  // 투자금액 계산 방식 (AMOUNT_INV 환산에만 사용)
+        "fx_option_other": "BASE" | "SPOT",  // fx_option이 EXECUTED인데 실거래 환율이 없는 투자건에 쓸 대체환율
         "fx_rates": {"USD": 1350},  // SPOT 환율 (펀드에 집행된 모든 통화에 대해 항상 필요 - REALIZED/UNREALIZED은 항상 SPOT 사용)
         "markup_option": "ACTUAL" | "EXPECTED",
         "display_currency": "NATIVE" | "FUND"   // 투자통화 vs 펀드통화 토글
@@ -641,12 +667,15 @@ def investment_overview():
 
     참고:
     - 투자금액(AMOUNT_INV)과 투자잔액은 fx_option에 따라 EXECUTED/BASE/SPOT 중 선택한 방식으로 환산됩니다.
+      fx_option이 EXECUTED인데 해당 CALL_ID에 실거래 환율이 없으면 fx_option_other로 재시도합니다.
     - REALIZED/UNREALIZED은 fx_option과 무관하게 항상 SPOT 환율(fx_rates)로 환산됩니다.
     - UNREALIZED: markup_option=ACTUAL이면 DIRECT_HOLDINGS(SHARES_HELD × PRICE_PER_SHARE_HELD) 기준.
       markup_option=EXPECTED이면 DIRECT_MARKUP_E가 DIRECT_MARKUP_A보다 최신인 CALL_ID에 한해
       POSTVAL_MKE/POSTVAL_INV 배수를 AMOUNT_INV에 적용해 TOTAL_VALUE를 추정(가격 정보가 없는 미확정 라운드이므로).
       그 외에는 ACTUAL과 동일하게 DIRECT_HOLDINGS 기준.
     - 투자잔액: SHARES_HELD × 취득가(전환 이력이 있으면 DIRECT_CONVERSION의 최신 단가, 없으면 DIRECT_INVESTMENT 투자 단가).
+    - display_currency="FUND"는 내부 회계 통화(FUND_BASICS.FUND_CURRENCY)가 아니라 약정통화
+      (FUND_SUBSCRIPTION.CURRENCY_SUB, LP가 실제로 약정한 통화) 기준으로 환산합니다.
     """
     clear_data_caches()  # 확인 버튼 클릭 시마다 Google Sheets에서 최신 데이터를 다시 읽어옴
     params = request.json or {}
@@ -658,6 +687,9 @@ def investment_overview():
     fx_rates = params.get('fx_rates', {}) or {}
     markup_option = params.get('markup_option', 'ACTUAL')  # ACTUAL | EXPECTED
     display_currency = params.get('display_currency', 'NATIVE')  # NATIVE | FUND
+    # 약정(FUND_SUBSCRIPTION)은 CALL_ID가 없어 집행환율을 적용할 수 없으므로, 집행환율 선택 시
+    # 실거래 환율이 없는 투자건은 대체환율(BASE/SPOT)로 대신 환산합니다.
+    fx_option_other = params.get('fx_option_other')
 
     fund_code = get_fund_code_from_nickname(fund_nickname)
     if not fund_code:
@@ -665,17 +697,20 @@ def investment_overview():
 
     fund_info = get_fund_info(fund_code)
     fund_currency = fund_info.get("FUND_CURRENCY") if fund_info else "KRW"
+    # Investment Overview는 LP(수익자) 관점이므로 "펀드통화" 모드는 내부 회계 통화가 아니라
+    # 약정통화(FUND_SUBSCRIPTION.CURRENCY_SUB) 기준으로 보여줍니다.
+    display_fund_currency = get_subscription_currency(fund_code, fund_currency)
 
     # 선택된 연월의 마지막 날짜 (as-of 기준일)
     last_day = calendar.monthrange(year, month)[1]
     as_of = date(year, month, last_day)
 
     rows, warnings = compute_investment_rows(
-        fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, display_currency
+        fund_code, display_fund_currency, as_of, fx_option, fx_rates, markup_option, display_currency, fx_option_other=fx_option_other
     )
 
     return jsonify({
-        "fund_currency": fund_currency,
+        "fund_currency": display_fund_currency,
         "display_currency": display_currency,
         "as_of": as_of.isoformat(),
         "rows": rows,
@@ -683,7 +718,7 @@ def investment_overview():
     })
 
 
-def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, display_currency):
+def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, display_currency, fx_option_other=None):
     """
     /api/investment-overview와 /api/fund-cashflow(Fund NAV 합산)가 공유하는 투자 건별 계산 로직입니다.
     (call_id, company_name, amount_inv, realized, unrealized, total_value, moic 등을 담은 rows 리스트와
@@ -750,9 +785,9 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
 
         target_currency = native_currency if display_currency == "NATIVE" else fund_currency
 
-        # 투자금액 환산
-        converted_amount_inv, warn = convert_amount(
-            amount_inv, native_currency, target_currency, fx_option, fx_rates, fund_code, call_id, as_of, label=company_label
+        # 투자금액 환산 (집행환율에 실거래 환율이 없으면 대체환율로 재시도)
+        converted_amount_inv, warn = convert_amount_with_fallback(
+            amount_inv, native_currency, target_currency, fx_option, fx_option_other, fx_rates, fund_code, call_id, as_of, label=company_label
         )
         if warn:
             add_fx_warning(warnings, warn)
@@ -800,8 +835,8 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
                     cost_basis_price = parse_number(latest_conv.get("PRICE_PER_SHARE_CONV"))
 
             remaining_target = cost_basis_currency if display_currency == "NATIVE" else fund_currency
-            converted_remaining, remaining_warn = convert_amount(
-                shares_held * cost_basis_price, cost_basis_currency, remaining_target, fx_option, fx_rates, fund_code, call_id, as_of, label=company_label
+            converted_remaining, remaining_warn = convert_amount_with_fallback(
+                shares_held * cost_basis_price, cost_basis_currency, remaining_target, fx_option, fx_option_other, fx_rates, fund_code, call_id, as_of, label=company_label
             )
             if remaining_warn:
                 add_fx_warning(warnings, remaining_warn)
@@ -923,7 +958,8 @@ def fund_cashflow():
 
     # FUND_EXPENSE/FUND_DISTRIBUTION은 CALL_ID가 없어 집행환율(EXECUTED)을 적용할 수 없으므로,
     # 집행환율 선택 시에는 별도로 지정한 대체 방식(BASE/SPOT)을 사용합니다.
-    other_fx_option = params.get('fx_option_other') if fx_option == "EXECUTED" else fx_option
+    fx_option_other = params.get('fx_option_other')
+    other_fx_option = fx_option_other if fx_option == "EXECUTED" else fx_option
 
     fund_code = get_fund_code_from_nickname(fund_nickname)
     if not fund_code:
@@ -1022,7 +1058,7 @@ def fund_cashflow():
 
     # Cash In: Fund NAV (기준일 기준 모든 투자건의 TOTAL VALUE 합계 - 항상 마지막 항목)
     nav_rows, nav_warnings = compute_investment_rows(
-        fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND"
+        fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND", fx_option_other=fx_option_other
     )
     merge_fx_warnings(warnings, nav_warnings)
     nav_total = sum(r["total_value"] for r in nav_rows if r.get("total_value") is not None)
@@ -1232,7 +1268,7 @@ def fund_metrics():
         distribution_cashflow.append((dist_date, converted))
 
     # ---------- NAV (Investment Overview와 동일 로직 재사용) ----------
-    nav_rows, nav_warnings = compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND")
+    nav_rows, nav_warnings = compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND", fx_option_other=fx_option_other)
     merge_fx_warnings(warnings, nav_warnings)
     nav_total = sum(r["total_value"] for r in nav_rows if r.get("total_value") is not None)
 

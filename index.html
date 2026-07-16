@@ -1425,7 +1425,6 @@
     const today = new Date();
     const currentYear = today.getFullYear();
     const currentMonth = today.getMonth() + 1;
-    const lastCompletedMonth = currentMonth - 1; // 이번 달은 아직 끝나지 않았으므로 제외
 
     let fundInceptionDate = null; // { year, month } | null (펀드 미선택 시 null)
 
@@ -1473,7 +1472,7 @@
       monthSelect.disabled = false;
       const selectedYear = parseInt(yearSelect.value);
       const minMonth = selectedYear === fundInceptionDate.year ? fundInceptionDate.month : 1;
-      const maxMonth = selectedYear === currentYear ? lastCompletedMonth : 12;
+      const maxMonth = selectedYear === currentYear ? currentMonth : 12;
 
       for (let month = minMonth; month <= maxMonth; month++) {
         const option = document.createElement("option");
@@ -2071,7 +2070,7 @@
       monthSelect.disabled = false;
       const selectedYear = parseInt(yearSelect.value);
       const minMonth = selectedYear === verifyFundInceptionDate.year ? verifyFundInceptionDate.month : 1;
-      const maxMonth = selectedYear === currentYear ? lastCompletedMonth : 12;
+      const maxMonth = selectedYear === currentYear ? currentMonth : 12;
 
       for (let month = minMonth; month <= maxMonth; month++) {
         const option = document.createElement("option");
