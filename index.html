@@ -2202,32 +2202,39 @@
         }
 
         let matchedCount = 0;
+        let checkableCount = 0;
         let tableHtml = '<table style="margin-top: 8px; font-size: 12px; width: auto;"><thead><tr>' +
           '<th>기업명</th><th>HINTS_ID</th><th>우리 시스템</th><th>업로드 파일</th><th>결과</th></tr></thead><tbody>';
 
         data.rows.forEach((row) => {
+          // HINTS_ID가 "-"인 건 대사 대상이 아니므로 주수 검사를 하지 않고 결과를 "-"로 표시합니다.
+          const skipCheck = row.hints_id === "-";
+
           const ours = row.shares_held !== null ? Math.round(row.shares_held) : null;
           const uploaded = Object.prototype.hasOwnProperty.call(uploadedShares, row.hints_id)
             ? Math.round(uploadedShares[row.hints_id])
             : null;
-          const isMatch = ours !== null && uploaded !== null && ours === uploaded;
-          if (isMatch) matchedCount++;
+          const isMatch = !skipCheck && ours !== null && uploaded !== null && ours === uploaded;
+          if (!skipCheck) {
+            checkableCount++;
+            if (isMatch) matchedCount++;
+          }
 
           tableHtml += `<tr>
             <td>${row.company_name}</td>
             <td>${row.hints_id}</td>
             <td style="text-align: right;">${ours !== null ? ours.toLocaleString("ko-KR") : "-"}</td>
             <td style="text-align: right;">${uploaded !== null ? uploaded.toLocaleString("ko-KR") : "-"}</td>
-            <td>${isMatch ? "✓" : "✗"}</td>
+            <td>${skipCheck ? "-" : (isMatch ? "✓" : "✗")}</td>
           </tr>`;
         });
 
         tableHtml += "</tbody></table>";
 
-        const allMatch = matchedCount === data.rows.length;
+        const allMatch = matchedCount === checkableCount;
         const summary = allMatch
-          ? `<span style="color: #007a00;">✓ 전체 일치 (${matchedCount}/${data.rows.length})</span>`
-          : `<span style="color: #cc0000;">✗ 불일치 있음 (${matchedCount}/${data.rows.length} 일치)</span>`;
+          ? `<span style="color: #007a00;">✓ 전체 일치 (${matchedCount}/${checkableCount})</span>`
+          : `<span style="color: #cc0000;">✗ 불일치 있음 (${matchedCount}/${checkableCount} 일치)</span>`;
 
         resultEl.innerHTML = summary + tableHtml;
       } catch (err) {
