@@ -1099,9 +1099,9 @@
       selectedFund: null,
       selectedFundNickname: null,
       fundCurrencies: [], // 해당 펀드의 집행 통화들
-      fundBaseCurrency: "KRW", // 해당 펀드의 FUND_CURRENCY (약정 통화)
+      needsFxOther: false, // CALL_ID 없는 항목(약정 등) 중 펀드 통화와 다른 통화가 있는지 (서버가 계산)
       fxOption: null, // "EXECUTED", "BASE", "SPOT"
-      fxOptionOther: null, // "BASE", "SPOT" - 집행환율 선택 시 비용/분배 환산에 사용할 대체 방식
+      fxOptionOther: null, // "BASE", "SPOT" - 집행환율 선택 시 비용/분배/약정 환산에 사용할 대체 방식
       fxRates: {}, // { "USD": 1200, "EUR": 1500 } 형태
       markupOption: null, // "ACTUAL", "EXPECTED"
     };
@@ -1234,6 +1234,13 @@
       }
     }
 
+    // 경고 메시지에 투자건명/비고 등 시트 원문이 섞여 들어가므로 innerHTML 삽입 전 이스케이프합니다.
+    function escapeHtml(str) {
+      const div = document.createElement("div");
+      div.textContent = String(str);
+      return div.innerHTML;
+    }
+
     function parseYmd(str) {
       if (!str) return null;
       const parts = String(str).split("-");
@@ -1259,7 +1266,7 @@
           const data = await res.json();
 
           fundReturnState.fundCurrencies = data.currencies;
-          fundReturnState.fundBaseCurrency = data.fund_currency || "KRW";
+          fundReturnState.needsFxOther = !!data.needs_fx_other;
           fundReturnState.fxRates = {};
 
           // REALIZED/UNREALIZED은 항상 SPOT 환율을 사용하므로, 투자금액 계산 방식과 무관하게 항상 입력 필요
@@ -1270,7 +1277,7 @@
           console.error("Error fetching currencies:", err);
         }
       } else {
-        fundReturnState.fundBaseCurrency = "KRW";
+        fundReturnState.needsFxOther = false;
         document.getElementById("fx-spot-inputs").style.display = "none";
         document.getElementById("fx-spot-divider").style.display = "none";
       }
@@ -1279,10 +1286,10 @@
       updateConfirmButtonState();
     }
 
-    // 펀드 통화(FUND_CURRENCY)가 KRW가 아니고 투자금 기준이 집행환율일 때만 "대체 환율"이 필요
-    // (FUND_EXPENSE/FUND_DISTRIBUTION은 CALL_ID가 없어 집행환율로는 KRW 외 펀드 통화로 환산할 방법이 없기 때문)
+    // 집행환율(EXECUTED) 선택 + CALL_ID 없는 항목(약정/비용/분배 등) 중 펀드 통화와 다른 통화가
+    // 있을 때만 "대체 환율"이 필요합니다 (해당 항목들은 CALL_ID가 없어 집행환율로 환산할 방법이 없기 때문).
     function isFxOtherRequired() {
-      return fundReturnState.fxOption === "EXECUTED" && fundReturnState.fundBaseCurrency !== "KRW";
+      return fundReturnState.fxOption === "EXECUTED" && fundReturnState.needsFxOther;
     }
 
     function updateFxOtherVisibility() {
@@ -1574,7 +1581,7 @@
       sortState = { key: null, dir: 1 };
 
       warningsEl.innerHTML = cached.warnings && cached.warnings.length > 0
-        ? cached.warnings.map((w) => `<div class="overview-warning">⚠ ${w}</div>`).join("")
+        ? cached.warnings.map((w) => `<div class="overview-warning">⚠ ${escapeHtml(w)}</div>`).join("")
         : "";
 
       renderOverviewTable();
@@ -1806,7 +1813,7 @@
 
         const currency = data.fund_currency;
         const b = data.basics;
-        document.getElementById("fm-currency").textContent = b.currency || "-";
+        document.getElementById("fm-currency").textContent = b.subscription_currency || b.currency || "-";
         document.getElementById("fm-commitment").textContent = formatCurrencyDisplay(b.commitment_amount, currency);
         document.getElementById("fm-target-irr").textContent = fmtPercent(b.target_irr);
         document.getElementById("fm-date-sub").textContent = b.date_subscription || "-";
@@ -1888,7 +1895,7 @@
 
         if (data.warnings && data.warnings.length > 0) {
           warningsEl.innerHTML = data.warnings
-            .map((w) => `<div class="overview-warning">⚠ ${w}</div>`)
+            .map((w) => `<div class="overview-warning">⚠ ${escapeHtml(w)}</div>`)
             .join("");
         }
 

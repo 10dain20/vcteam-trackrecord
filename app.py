@@ -264,40 +264,64 @@ def get_funds():
 
 @app.route('/api/currencies', methods=['GET'])
 def get_currencies():
-    """선택된 펀드의 집행 통화와 펀드 통화(FUND_CURRENCY)를 반환합니다."""
+    """
+    선택된 펀드의 집행 통화, 펀드 통화(FUND_CURRENCY), 대체환율 필요 여부를 반환합니다.
+
+    needs_fx_other: 집행환율(EXECUTED) 선택 시 CALL_ID가 없어 적용할 수 없는 항목
+    (FUND_SUBSCRIPTION 등)의 통화가 펀드 통화와 다른 경우 True. Femtech처럼 약정통화(USD)와
+    펀드 통화(KRW)가 다른 펀드가 대표적인 예시입니다.
+    """
     fund_nickname = request.args.get('fund')
 
+    empty_response = {"currencies": [], "fund_currency": "KRW", "needs_fx_other": False}
+
     if not fund_nickname:
-        return jsonify({"currencies": [], "fund_currency": "KRW"})
+        return jsonify(empty_response)
 
     fund_code = get_fund_code_from_nickname(fund_nickname)
     if not fund_code:
-        return jsonify({"currencies": [], "fund_currency": "KRW"})
+        return jsonify(empty_response)
 
     fund_info = get_fund_info(fund_code)
     fund_currency = (fund_info.get("FUND_CURRENCY") if fund_info else None) or "KRW"
 
     data = get_sheet_data("DIRECT_INVESTMENT")
 
-    if not data or len(data) < 1:
-        return jsonify({"currencies": [], "fund_currency": fund_currency})
-
-    headers = data[0]
-    fund_code_idx = get_column_index(headers, "FUND_CODE")
-    currency_idx = get_column_index(headers, "CURRENCY_INV")
-
-    if fund_code_idx == -1 or currency_idx == -1:
-        return jsonify({"currencies": [], "fund_currency": fund_currency})
-
     currencies = set()
-    for row in data[1:]:
-        if fund_code_idx < len(row) and row[fund_code_idx] == fund_code:
-            if currency_idx < len(row):
-                currency = row[currency_idx].strip() if row[currency_idx] else ""
-                if currency and currency != "KRW":
-                    currencies.add(currency)
+    if data and len(data) >= 1:
+        headers = data[0]
+        fund_code_idx = get_column_index(headers, "FUND_CODE")
+        currency_idx = get_column_index(headers, "CURRENCY_INV")
 
-    return jsonify({"currencies": sorted(list(currencies)), "fund_currency": fund_currency})
+        if fund_code_idx != -1 and currency_idx != -1:
+            for row in data[1:]:
+                if fund_code_idx < len(row) and row[fund_code_idx] == fund_code:
+                    if currency_idx < len(row):
+                        currency = row[currency_idx].strip() if row[currency_idx] else ""
+                        if currency and currency != "KRW":
+                            currencies.add(currency)
+
+    # 약정통화(CURRENCY_SUB)가 펀드 통화와 다르면, FUND_SUBSCRIPTION은 CALL_ID가 없어
+    # 집행환율로는 환산할 수 없으므로 대체환율 선택이 필요합니다.
+    needs_fx_other = fund_currency != "KRW"
+    subscription_currency = None
+    for s in get_sheet_dicts("FUND_SUBSCRIPTION"):
+        if s.get("FUND_CODE") != fund_code:
+            continue
+        sub_currency = (s.get("CURRENCY_SUB") or "").strip() or fund_currency
+        if subscription_currency is None:
+            subscription_currency = sub_currency
+        if sub_currency != fund_currency:
+            needs_fx_other = True
+            if sub_currency != "KRW":
+                currencies.add(sub_currency)
+
+    return jsonify({
+        "currencies": sorted(list(currencies)),
+        "fund_currency": fund_currency,
+        "needs_fx_other": needs_fx_other,
+        "subscription_currency": subscription_currency or fund_currency,
+    })
 
 
 @app.route('/api/fund-base-fx', methods=['GET'])
@@ -385,25 +409,49 @@ def get_rate_to_krw(currency, fx_option, fx_rates, fund_code, call_id, as_of):
     return None
 
 
-def convert_amount(amount, native_currency, target_currency, fx_option, fx_rates, fund_code, call_id, as_of):
+def convert_amount(amount, native_currency, target_currency, fx_option, fx_rates, fund_code, call_id, as_of, label=None):
     """
     금액을 native_currency에서 target_currency로 환산합니다.
-    변환 불가 시 (None, warning_message) 형태로 반환합니다.
+    변환 불가 시 (None, {"currency": 못찾은통화, "label": 어떤 항목인지}) 형태로 반환합니다.
     """
     if native_currency == target_currency:
         return amount, None
 
     rate_native = get_rate_to_krw(native_currency, fx_option, fx_rates, fund_code, call_id, as_of)
     if rate_native is None:
-        return None, f"{native_currency} 환율을 찾을 수 없습니다"
+        return None, {"currency": native_currency, "label": label}
 
     rate_target = get_rate_to_krw(target_currency, fx_option, fx_rates, fund_code, call_id, as_of)
     if rate_target is None:
-        return None, f"{target_currency} 환율을 찾을 수 없습니다"
+        return None, {"currency": target_currency, "label": label}
 
     # amount(native) -> KRW -> target
     amount_krw = amount * rate_native
     return amount_krw / rate_target, None
+
+
+def add_fx_warning(warnings, warn):
+    """convert_amount가 반환한 {"currency", "label"}을 통화별로 모읍니다."""
+    if warn:
+        warnings.setdefault(warn["currency"], []).append(warn.get("label"))
+
+
+def merge_fx_warnings(target, source):
+    """compute_investment_rows 등 다른 곳에서 모은 통화별 warnings를 합칩니다."""
+    for currency, labels in source.items():
+        target.setdefault(currency, []).extend(labels)
+
+
+def format_fx_warnings(warnings):
+    """{"USD": ["A", "B", None]} -> ["USD 환율 부재: A, B"] 형태의 문구로 변환합니다."""
+    messages = []
+    for currency in sorted(warnings.keys()):
+        labels = list(dict.fromkeys(l for l in warnings[currency] if l))
+        if labels:
+            messages.append(f"{currency} 환율 부재: {', '.join(labels)}")
+        else:
+            messages.append(f"{currency} 환율을 찾을 수 없습니다")
+    return messages
 
 
 def calculate_xirr(cashflows, guess=0.1):
@@ -610,7 +658,7 @@ def investment_overview():
         "display_currency": display_currency,
         "as_of": as_of.isoformat(),
         "rows": rows,
-        "warnings": sorted(warnings),
+        "warnings": format_fx_warnings(warnings),
     })
 
 
@@ -667,11 +715,12 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
         fund_investments.append(inv)
 
     rows = []
-    warnings = set()
+    warnings = {}
 
     for inv in fund_investments:
         call_id = inv.get("CALL_ID")
         company_id = inv.get("COMPANY_ID")
+        company_label = company_name_map.get(company_id, company_id)
         native_currency = (inv.get("CURRENCY_INV") or "").strip()
         amount_inv = parse_number(inv.get("AMOUNT_INV"))
         shares_inv = parse_number(inv.get("SHARES_INV"))
@@ -682,10 +731,10 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
 
         # 투자금액 환산
         converted_amount_inv, warn = convert_amount(
-            amount_inv, native_currency, target_currency, fx_option, fx_rates, fund_code, call_id, as_of
+            amount_inv, native_currency, target_currency, fx_option, fx_rates, fund_code, call_id, as_of, label=company_label
         )
         if warn:
-            warnings.add(warn)
+            add_fx_warning(warnings, warn)
 
         # REALIZED: 이 CALL_ID의 실현 내역 합산 (as-of 날짜 이하만)
         realized_total = 0.0
@@ -699,10 +748,10 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
             # REALIZED/UNREALIZED은 투자금액 계산 방식(fx_option)과 무관하게 항상 SPOT 환율을 사용합니다
             real_target = real_currency if display_currency == "NATIVE" else fund_currency
             converted_real, real_warn = convert_amount(
-                real_amount, real_currency, real_target, "SPOT", fx_rates, fund_code, call_id, as_of
+                real_amount, real_currency, real_target, "SPOT", fx_rates, fund_code, call_id, as_of, label=company_label
             )
             if real_warn:
-                warnings.add(real_warn)
+                add_fx_warning(warnings, real_warn)
                 realized_conversion_failed = True
                 continue
             realized_total += converted_real
@@ -729,10 +778,10 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
 
             remaining_target = cost_basis_currency if display_currency == "NATIVE" else fund_currency
             converted_remaining, remaining_warn = convert_amount(
-                shares_held * cost_basis_price, cost_basis_currency, remaining_target, fx_option, fx_rates, fund_code, call_id, as_of
+                shares_held * cost_basis_price, cost_basis_currency, remaining_target, fx_option, fx_rates, fund_code, call_id, as_of, label=company_label
             )
             if remaining_warn:
-                warnings.add(remaining_warn)
+                add_fx_warning(warnings, remaining_warn)
             else:
                 remaining_balance = converted_remaining
 
@@ -757,10 +806,10 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
                     moic_expected = parse_number(latest_e_row.get("POSTVAL_MKE")) / postval_inv
                     total_target = native_currency if display_currency == "NATIVE" else fund_currency
                     converted_total, total_warn = convert_amount(
-                        moic_expected * amount_inv, native_currency, total_target, "SPOT", fx_rates, fund_code, call_id, as_of
+                        moic_expected * amount_inv, native_currency, total_target, "SPOT", fx_rates, fund_code, call_id, as_of, label=company_label
                     )
                     if total_warn:
-                        warnings.add(total_warn)
+                        add_fx_warning(warnings, total_warn)
                     elif not realized_conversion_failed:
                         unrealized = converted_total - realized_total
             else:
@@ -769,10 +818,10 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
                 if price_held:
                     unrealized_target = currency_held if display_currency == "NATIVE" else fund_currency
                     converted_unrealized, unrealized_warn = convert_amount(
-                        shares_held * price_held, currency_held, unrealized_target, "SPOT", fx_rates, fund_code, call_id, as_of
+                        shares_held * price_held, currency_held, unrealized_target, "SPOT", fx_rates, fund_code, call_id, as_of, label=company_label
                     )
                     if unrealized_warn:
-                        warnings.add(unrealized_warn)
+                        add_fx_warning(warnings, unrealized_warn)
                     else:
                         unrealized = converted_unrealized
 
@@ -870,7 +919,7 @@ def fund_cashflow():
     company_name_map = {c.get("COMPANY_ID"): c.get("COMPANY_NAME") for c in companies}
 
     entries = []
-    warnings = set()
+    warnings = {}
 
     # Cash Out: DIRECT_INVESTMENT (투자 집행)
     for inv in investments:
@@ -882,17 +931,18 @@ def fund_cashflow():
 
         native_currency = (inv.get("CURRENCY_INV") or "").strip()
         amount_inv = parse_number(inv.get("AMOUNT_INV"))
+        company_label = company_name_map.get(inv.get("COMPANY_ID"), inv.get("COMPANY_ID"))
         converted, warn = convert_amount(
-            amount_inv, native_currency, fund_currency, fx_option, fx_rates, fund_code, inv.get("CALL_ID"), as_of
+            amount_inv, native_currency, fund_currency, fx_option, fx_rates, fund_code, inv.get("CALL_ID"), as_of, label=company_label
         )
         if warn:
-            warnings.add(warn)
+            add_fx_warning(warnings, warn)
             continue
 
         entries.append({
             "date": format_date_iso(inv.get("DATE_INV")),
             "amount": -converted,
-            "note": company_name_map.get(inv.get("COMPANY_ID"), inv.get("COMPANY_ID")),
+            "note": company_label,
             "type": "investment",
         })
 
@@ -906,11 +956,12 @@ def fund_cashflow():
 
         exp_currency = (exp.get("CURRENCY_EXP") or "").strip() or fund_currency
         amount_exp = parse_number(exp.get("AMOUNT_EXP"))
+        exp_label = (exp.get("NOTE_EXP") or "").strip() or format_date_iso(exp.get("DATE_EXP")) or "비용"
         converted, warn = convert_amount(
-            amount_exp, exp_currency, fund_currency, other_fx_option, fx_rates, fund_code, None, as_of
+            amount_exp, exp_currency, fund_currency, other_fx_option, fx_rates, fund_code, None, as_of, label=exp_label
         )
         if warn:
-            warnings.add(warn)
+            add_fx_warning(warnings, warn)
             continue
 
         entries.append({
@@ -930,11 +981,12 @@ def fund_cashflow():
 
         dist_currency = (dist.get("CURRENCY_DIST") or "").strip() or fund_currency
         amount_dist = parse_number(dist.get("AMOUNT_DIST"))
+        dist_label = (dist.get("NOTE_DIST") or "").strip() or format_date_iso(dist.get("DATE_DIST")) or "분배"
         converted, warn = convert_amount(
-            amount_dist, dist_currency, fund_currency, other_fx_option, fx_rates, fund_code, None, as_of
+            amount_dist, dist_currency, fund_currency, other_fx_option, fx_rates, fund_code, None, as_of, label=dist_label
         )
         if warn:
-            warnings.add(warn)
+            add_fx_warning(warnings, warn)
             continue
 
         entries.append({
@@ -948,7 +1000,7 @@ def fund_cashflow():
     nav_rows, nav_warnings = compute_investment_rows(
         fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND"
     )
-    warnings.update(nav_warnings)
+    merge_fx_warnings(warnings, nav_warnings)
     nav_total = sum(r["total_value"] for r in nav_rows if r.get("total_value") is not None)
 
     entries.append({
@@ -964,7 +1016,7 @@ def fund_cashflow():
         "fund_currency": fund_currency,
         "as_of": as_of.isoformat(),
         "rows": entries,
-        "warnings": sorted(warnings),
+        "warnings": format_fx_warnings(warnings),
     })
 
 
@@ -991,6 +1043,10 @@ def fund_metrics():
     fx_option = params.get('fx_option')
     fx_rates = params.get('fx_rates', {}) or {}
     markup_option = params.get('markup_option', 'ACTUAL')
+    # 약정(FUND_SUBSCRIPTION)은 CALL_ID가 없어 집행환율을 적용할 수 없으므로, 집행환율 선택 시
+    # 대체환율(BASE/SPOT)로 대신 환산합니다 (Fund Cash Flow의 비용/분배 환산과 동일한 방식).
+    fx_option_other = params.get('fx_option_other')
+    other_fx_option = fx_option_other if fx_option == "EXECUTED" else fx_option
 
     fund_code = get_fund_code_from_nickname(fund_nickname)
     if not fund_code:
@@ -1002,12 +1058,12 @@ def fund_metrics():
     last_day = calendar.monthrange(year, month)[1]
     as_of = date(year, month, last_day)
 
-    warnings = set()
+    warnings = {}
 
-    def to_fund_currency(amount, native_currency, call_id, method="SPOT"):
-        converted, warn = convert_amount(amount, native_currency, fund_currency, method, fx_rates, fund_code, call_id, as_of)
+    def to_fund_currency(amount, native_currency, call_id, method="SPOT", label=None):
+        converted, warn = convert_amount(amount, native_currency, fund_currency, method, fx_rates, fund_code, call_id, as_of, label=label)
         if warn:
-            warnings.add(warn)
+            add_fx_warning(warnings, warn)
             return None
         return converted
 
@@ -1016,12 +1072,26 @@ def fund_metrics():
     target_hedge_raw = fund_info.get("FUND_TARGET_HEDGE_RATE")
 
     subscriptions = get_sheet_dicts("FUND_SUBSCRIPTION")
-    commitment_total = sum(
-        parse_number(s.get("AMOUNT_SUB")) for s in subscriptions if s.get("FUND_CODE") == fund_code
-    )
+    commitment_total = 0.0
+    subscription_currency = None
+    for s in subscriptions:
+        if s.get("FUND_CODE") != fund_code:
+            continue
+        sub_currency = (s.get("CURRENCY_SUB") or "").strip() or fund_currency
+        if subscription_currency is None:
+            subscription_currency = sub_currency
+        amount_sub = parse_number(s.get("AMOUNT_SUB"))
+        converted, warn = convert_amount(
+            amount_sub, sub_currency, fund_currency, other_fx_option, fx_rates, fund_code, None, as_of, label="약정액"
+        )
+        if warn:
+            add_fx_warning(warnings, warn)
+            continue
+        commitment_total += converted
 
     basics = {
         "currency": fund_currency,
+        "subscription_currency": subscription_currency or fund_currency,
         "commitment_amount": commitment_total,
         "target_irr_type": (fund_info.get("FUND_TARGET_IRR_TYPE") or "").strip() or None,
         "target_irr": parse_number(target_irr_raw) * 100 if target_irr_raw not in (None, "") else None,
@@ -1033,10 +1103,13 @@ def fund_metrics():
 
     # ---------- 데이터 로드 ----------
     investments = get_sheet_dicts("DIRECT_INVESTMENT")
+    companies = get_sheet_dicts("DIRECT_COMPANY")
     realizations = get_sheet_dicts("DIRECT_REALIZATION")
     expenses = get_sheet_dicts("FUND_EXPENSE")
     distributions = get_sheet_dicts("FUND_DISTRIBUTION")
     fund_fx_rows = get_sheet_dicts("FUND_FX")
+
+    company_name_map = {c.get("COMPANY_ID"): c.get("COMPANY_NAME") for c in companies}
 
     fund_investments = []
     for inv in investments:
@@ -1053,9 +1126,10 @@ def fund_metrics():
     for inv in fund_investments:
         native_currency = (inv.get("CURRENCY_INV") or "").strip()
         amount_inv = parse_number(inv.get("AMOUNT_INV"))
-        converted, warn = convert_amount(amount_inv, native_currency, fund_currency, fx_option, fx_rates, fund_code, inv.get("CALL_ID"), as_of)
+        company_label = company_name_map.get(inv.get("COMPANY_ID"), inv.get("COMPANY_ID"))
+        converted, warn = convert_amount(amount_inv, native_currency, fund_currency, fx_option, fx_rates, fund_code, inv.get("CALL_ID"), as_of, label=company_label)
         if warn:
-            warnings.add(warn)
+            add_fx_warning(warnings, warn)
             continue
         total_invested += converted
         investment_cashflow.append((parse_date(inv.get("DATE_INV")), -converted))
@@ -1072,7 +1146,8 @@ def fund_metrics():
             continue
         exp_currency = (exp.get("CURRENCY_EXP") or "").strip() or fund_currency
         amount_exp = parse_number(exp.get("AMOUNT_EXP"))
-        converted = to_fund_currency(amount_exp, exp_currency, None)
+        exp_label = (exp.get("NOTE_EXP") or "").strip() or format_date_iso(exp.get("DATE_EXP")) or "비용"
+        converted = to_fund_currency(amount_exp, exp_currency, None, label=exp_label)
         if converted is None:
             continue
         total_fund_expense += converted
@@ -1103,7 +1178,8 @@ def fund_metrics():
         native_currency = (inv.get("CURRENCY_INV") or "").strip() if inv else fund_currency
         real_currency = (real.get("CURRENCY_REAL") or "").strip() or native_currency
         real_amount = parse_number(real.get("AMOUNT_REAL"))
-        converted = to_fund_currency(real_amount, real_currency, real.get("CALL_ID"))
+        real_label = company_name_map.get(inv.get("COMPANY_ID"), inv.get("COMPANY_ID")) if inv else None
+        converted = to_fund_currency(real_amount, real_currency, real.get("CALL_ID"), label=real_label)
         if converted is None:
             continue
         txn_type = (real.get("TXN_TYPE_REAL") or "").strip()
@@ -1124,7 +1200,8 @@ def fund_metrics():
             continue
         dist_currency = (dist.get("CURRENCY_DIST") or "").strip() or fund_currency
         amount_dist = parse_number(dist.get("AMOUNT_DIST"))
-        converted = to_fund_currency(amount_dist, dist_currency, None)
+        dist_label = (dist.get("NOTE_DIST") or "").strip() or format_date_iso(dist.get("DATE_DIST")) or "분배"
+        converted = to_fund_currency(amount_dist, dist_currency, None, label=dist_label)
         if converted is None:
             continue
         total_distributions += converted
@@ -1132,7 +1209,7 @@ def fund_metrics():
 
     # ---------- NAV (Investment Overview와 동일 로직 재사용) ----------
     nav_rows, nav_warnings = compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND")
-    warnings.update(nav_warnings)
+    merge_fx_warnings(warnings, nav_warnings)
     nav_total = sum(r["total_value"] for r in nav_rows if r.get("total_value") is not None)
 
     # ---------- INVESTMENT (건수/티켓 사이즈/지분율 등, nav_rows 재사용 - 이미 펀드통화로 환산되어 있음) ----------
@@ -1217,7 +1294,7 @@ def fund_metrics():
             "settlement_gain": settlement_gain_only,
             "settlement_loss": settlement_loss_only,
         },
-        "warnings": sorted(warnings),
+        "warnings": format_fx_warnings(warnings),
     })
 
 
@@ -1250,9 +1327,12 @@ def verify_cashflow():
     as_of = date(year, month, last_day)
 
     investments = get_sheet_dicts("DIRECT_INVESTMENT")
+    companies = get_sheet_dicts("DIRECT_COMPANY")
     expenses = get_sheet_dicts("FUND_EXPENSE")
 
-    warnings = set()
+    company_name_map = {c.get("COMPANY_ID"): c.get("COMPANY_NAME") for c in companies}
+
+    warnings = {}
 
     total_invested = 0.0
     for inv in investments:
@@ -1263,11 +1343,12 @@ def verify_cashflow():
             continue
         native_currency = (inv.get("CURRENCY_INV") or "").strip()
         amount_inv = parse_number(inv.get("AMOUNT_INV"))
+        company_label = company_name_map.get(inv.get("COMPANY_ID"), inv.get("COMPANY_ID"))
         converted, warn = convert_amount(
-            amount_inv, native_currency, fund_currency, "EXECUTED", {}, fund_code, inv.get("CALL_ID"), as_of
+            amount_inv, native_currency, fund_currency, "EXECUTED", {}, fund_code, inv.get("CALL_ID"), as_of, label=company_label
         )
         if warn:
-            warnings.add(warn)
+            add_fx_warning(warnings, warn)
             continue
         total_invested += converted
 
@@ -1280,11 +1361,12 @@ def verify_cashflow():
             continue
         exp_currency = (exp.get("CURRENCY_EXP") or "").strip() or fund_currency
         amount_exp = parse_number(exp.get("AMOUNT_EXP"))
+        exp_label = (exp.get("NOTE_EXP") or "").strip() or format_date_iso(exp.get("DATE_EXP")) or "비용"
         converted, warn = convert_amount(
-            amount_exp, exp_currency, fund_currency, "EXECUTED", {}, fund_code, None, as_of
+            amount_exp, exp_currency, fund_currency, "EXECUTED", {}, fund_code, None, as_of, label=exp_label
         )
         if warn:
-            warnings.add(warn)
+            add_fx_warning(warnings, warn)
             continue
         total_expense += converted
 
@@ -1294,7 +1376,7 @@ def verify_cashflow():
         "total_invested": total_invested,
         "total_expense": total_expense,
         "total_cost": total_invested + total_expense,
-        "warnings": sorted(warnings),
+        "warnings": format_fx_warnings(warnings),
     })
 
 
