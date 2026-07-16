@@ -264,40 +264,64 @@ def get_funds():
 
 @app.route('/api/currencies', methods=['GET'])
 def get_currencies():
-    """선택된 펀드의 집행 통화와 펀드 통화(FUND_CURRENCY)를 반환합니다."""
+    """
+    선택된 펀드의 집행 통화, 펀드 통화(FUND_CURRENCY), 대체환율 필요 여부를 반환합니다.
+
+    needs_fx_other: 집행환율(EXECUTED) 선택 시 CALL_ID가 없어 적용할 수 없는 항목
+    (FUND_SUBSCRIPTION 등)의 통화가 펀드 통화와 다른 경우 True. Femtech처럼 약정통화(USD)와
+    펀드 통화(KRW)가 다른 펀드가 대표적인 예시입니다.
+    """
     fund_nickname = request.args.get('fund')
 
+    empty_response = {"currencies": [], "fund_currency": "KRW", "needs_fx_other": False}
+
     if not fund_nickname:
-        return jsonify({"currencies": [], "fund_currency": "KRW"})
+        return jsonify(empty_response)
 
     fund_code = get_fund_code_from_nickname(fund_nickname)
     if not fund_code:
-        return jsonify({"currencies": [], "fund_currency": "KRW"})
+        return jsonify(empty_response)
 
     fund_info = get_fund_info(fund_code)
     fund_currency = (fund_info.get("FUND_CURRENCY") if fund_info else None) or "KRW"
 
     data = get_sheet_data("DIRECT_INVESTMENT")
 
-    if not data or len(data) < 1:
-        return jsonify({"currencies": [], "fund_currency": fund_currency})
-
-    headers = data[0]
-    fund_code_idx = get_column_index(headers, "FUND_CODE")
-    currency_idx = get_column_index(headers, "CURRENCY_INV")
-
-    if fund_code_idx == -1 or currency_idx == -1:
-        return jsonify({"currencies": [], "fund_currency": fund_currency})
-
     currencies = set()
-    for row in data[1:]:
-        if fund_code_idx < len(row) and row[fund_code_idx] == fund_code:
-            if currency_idx < len(row):
-                currency = row[currency_idx].strip() if row[currency_idx] else ""
-                if currency and currency != "KRW":
-                    currencies.add(currency)
+    if data and len(data) >= 1:
+        headers = data[0]
+        fund_code_idx = get_column_index(headers, "FUND_CODE")
+        currency_idx = get_column_index(headers, "CURRENCY_INV")
 
-    return jsonify({"currencies": sorted(list(currencies)), "fund_currency": fund_currency})
+        if fund_code_idx != -1 and currency_idx != -1:
+            for row in data[1:]:
+                if fund_code_idx < len(row) and row[fund_code_idx] == fund_code:
+                    if currency_idx < len(row):
+                        currency = row[currency_idx].strip() if row[currency_idx] else ""
+                        if currency and currency != "KRW":
+                            currencies.add(currency)
+
+    # 약정통화(CURRENCY_SUB)가 펀드 통화와 다르면, FUND_SUBSCRIPTION은 CALL_ID가 없어
+    # 집행환율로는 환산할 수 없으므로 대체환율 선택이 필요합니다.
+    needs_fx_other = fund_currency != "KRW"
+    subscription_currency = None
+    for s in get_sheet_dicts("FUND_SUBSCRIPTION"):
+        if s.get("FUND_CODE") != fund_code:
+            continue
+        sub_currency = (s.get("CURRENCY_SUB") or "").strip() or fund_currency
+        if subscription_currency is None:
+            subscription_currency = sub_currency
+        if sub_currency != fund_currency:
+            needs_fx_other = True
+            if sub_currency != "KRW":
+                currencies.add(sub_currency)
+
+    return jsonify({
+        "currencies": sorted(list(currencies)),
+        "fund_currency": fund_currency,
+        "needs_fx_other": needs_fx_other,
+        "subscription_currency": subscription_currency or fund_currency,
+    })
 
 
 @app.route('/api/fund-base-fx', methods=['GET'])
@@ -1019,6 +1043,10 @@ def fund_metrics():
     fx_option = params.get('fx_option')
     fx_rates = params.get('fx_rates', {}) or {}
     markup_option = params.get('markup_option', 'ACTUAL')
+    # 약정(FUND_SUBSCRIPTION)은 CALL_ID가 없어 집행환율을 적용할 수 없으므로, 집행환율 선택 시
+    # 대체환율(BASE/SPOT)로 대신 환산합니다 (Fund Cash Flow의 비용/분배 환산과 동일한 방식).
+    fx_option_other = params.get('fx_option_other')
+    other_fx_option = fx_option_other if fx_option == "EXECUTED" else fx_option
 
     fund_code = get_fund_code_from_nickname(fund_nickname)
     if not fund_code:
@@ -1044,12 +1072,26 @@ def fund_metrics():
     target_hedge_raw = fund_info.get("FUND_TARGET_HEDGE_RATE")
 
     subscriptions = get_sheet_dicts("FUND_SUBSCRIPTION")
-    commitment_total = sum(
-        parse_number(s.get("AMOUNT_SUB")) for s in subscriptions if s.get("FUND_CODE") == fund_code
-    )
+    commitment_total = 0.0
+    subscription_currency = None
+    for s in subscriptions:
+        if s.get("FUND_CODE") != fund_code:
+            continue
+        sub_currency = (s.get("CURRENCY_SUB") or "").strip() or fund_currency
+        if subscription_currency is None:
+            subscription_currency = sub_currency
+        amount_sub = parse_number(s.get("AMOUNT_SUB"))
+        converted, warn = convert_amount(
+            amount_sub, sub_currency, fund_currency, other_fx_option, fx_rates, fund_code, None, as_of, label="약정액"
+        )
+        if warn:
+            add_fx_warning(warnings, warn)
+            continue
+        commitment_total += converted
 
     basics = {
         "currency": fund_currency,
+        "subscription_currency": subscription_currency or fund_currency,
         "commitment_amount": commitment_total,
         "target_irr_type": (fund_info.get("FUND_TARGET_IRR_TYPE") or "").strip() or None,
         "target_irr": parse_number(target_irr_raw) * 100 if target_irr_raw not in (None, "") else None,
