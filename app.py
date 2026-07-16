@@ -813,40 +813,41 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
         # - EXPECTED: DIRECT_MARKUP_E가 DIRECT_MARKUP_A보다 최신이면 (미확정 라운드라 주당가격이 없으므로)
         #   POSTVAL_MKE / POSTVAL_INV 배수를 AMOUNT_INV에 적용해 TOTAL_VALUE 추정. 그 외에는 ACTUAL과 동일하게 처리.
         unrealized = None
-        if shares_held:
-            use_expected_postval = False
-            latest_e_row = None
-            if markup_option == "EXPECTED":
-                call_markups_a = [dm for dm in markups_a_by_call.get(call_id, []) if dm[0] <= as_of]
-                call_markups_e = [dm for dm in markups_e_by_call.get(call_id, []) if dm[0] <= as_of]
-                latest_a_date = max((dm[0] for dm in call_markups_a), default=None)
-                if call_markups_e:
-                    latest_e_date, latest_e_row = max(call_markups_e, key=lambda dm: dm[0])
-                    use_expected_postval = latest_a_date is None or latest_e_date > latest_a_date
+        use_expected_postval = False
+        latest_e_row = None
+        if markup_option == "EXPECTED":
+            call_markups_a = [dm for dm in markups_a_by_call.get(call_id, []) if dm[0] <= as_of]
+            call_markups_e = [dm for dm in markups_e_by_call.get(call_id, []) if dm[0] <= as_of]
+            latest_a_date = max((dm[0] for dm in call_markups_a), default=None)
+            if call_markups_e:
+                latest_e_date, latest_e_row = max(call_markups_e, key=lambda dm: dm[0])
+                use_expected_postval = latest_a_date is None or latest_e_date > latest_a_date
 
-            if use_expected_postval:
-                if postval_inv:
-                    moic_expected = parse_number(latest_e_row.get("POSTVAL_MKE")) / postval_inv
-                    total_target = native_currency if display_currency == "NATIVE" else fund_currency
-                    converted_total, total_warn = convert_amount(
-                        moic_expected * amount_inv, native_currency, total_target, "SPOT", fx_rates, fund_code, call_id, as_of, label=company_label
-                    )
-                    if total_warn:
-                        add_fx_warning(warnings, total_warn)
-                    elif not realized_conversion_failed:
-                        unrealized = converted_total - realized_total
-            else:
-                currency_held = (holding.get("CURRENCY_HELD") or "").strip() or native_currency
-                price_held = parse_number(holding.get("PRICE_PER_SHARE_HELD"))
-                if price_held:
-                    unrealized_target = currency_held if display_currency == "NATIVE" else fund_currency
-                    converted_unrealized, unrealized_warn = convert_amount(
-                        shares_held * price_held, currency_held, unrealized_target, "SPOT", fx_rates, fund_code, call_id, as_of, label=company_label
-                    )
-                    if unrealized_warn:
-                        add_fx_warning(warnings, unrealized_warn)
-                    else:
-                        unrealized = converted_unrealized
+        if use_expected_postval:
+            # EXPECTED(미확정 라운드) 추정은 POSTVAL_MKE/POSTVAL_INV 배수만 필요하고 실제 보유
+            # 주식수(SHARES_HELD)는 쓰지 않으므로, shares_held가 없어도(전환 전 SAFE 등) 계산합니다.
+            if postval_inv:
+                moic_expected = parse_number(latest_e_row.get("POSTVAL_MKE")) / postval_inv
+                total_target = native_currency if display_currency == "NATIVE" else fund_currency
+                converted_total, total_warn = convert_amount(
+                    moic_expected * amount_inv, native_currency, total_target, "SPOT", fx_rates, fund_code, call_id, as_of, label=company_label
+                )
+                if total_warn:
+                    add_fx_warning(warnings, total_warn)
+                elif not realized_conversion_failed:
+                    unrealized = converted_total - realized_total
+        elif shares_held:
+            currency_held = (holding.get("CURRENCY_HELD") or "").strip() or native_currency
+            price_held = parse_number(holding.get("PRICE_PER_SHARE_HELD"))
+            if price_held:
+                unrealized_target = currency_held if display_currency == "NATIVE" else fund_currency
+                converted_unrealized, unrealized_warn = convert_amount(
+                    shares_held * price_held, currency_held, unrealized_target, "SPOT", fx_rates, fund_code, call_id, as_of, label=company_label
+                )
+                if unrealized_warn:
+                    add_fx_warning(warnings, unrealized_warn)
+                else:
+                    unrealized = converted_unrealized
 
         realized_value = None if realized_conversion_failed else realized_total
         total_value = None
