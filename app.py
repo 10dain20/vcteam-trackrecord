@@ -600,15 +600,24 @@ def compute_and_write_holdings(fund_code, as_of):
             )
 
         batch = []
+        new_rows = []
         for call_id, (sec_type, shares, currency, price) in updates.items():
-            if call_id not in row_map or holding_unchanged(call_id, sec_type, shares, currency, price):
-                continue
-            row_num = row_map[call_id]
-            batch.append({"range": f"B{row_num}:E{row_num}", "values": [[sec_type, shares, currency, price]]})
+            if call_id in row_map:
+                if holding_unchanged(call_id, sec_type, shares, currency, price):
+                    continue
+                row_num = row_map[call_id]
+                batch.append({"range": f"B{row_num}:E{row_num}", "values": [[sec_type, shares, currency, price]]})
+            else:
+                # 이 CALL_ID의 행이 DIRECT_HOLDINGS에 아직 없으면 (신규 투자건) 새 행을 추가합니다.
+                # 기존에는 이런 CALL_ID를 그냥 건너뛰어서 보유 현황이 영영 계산되지 않았습니다.
+                new_rows.append([call_id, sec_type, shares, currency, price])
 
-        if batch:
+        if batch or new_rows:
             ws = get_gspread_worksheet("DIRECT_HOLDINGS")
-            ws.batch_update(batch, value_input_option="USER_ENTERED")
+            if batch:
+                ws.batch_update(batch, value_input_option="USER_ENTERED")
+            if new_rows:
+                ws.append_rows(new_rows, value_input_option="USER_ENTERED")
             invalidate_sheet("DIRECT_HOLDINGS")  # 캐시 무효화 -> 이후 조회 시 최신값 반영
     except Exception as e:
         print(f"[경고] DIRECT_HOLDINGS 갱신 실패 (무시하고 계속 진행): {e}")
