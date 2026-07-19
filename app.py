@@ -1769,9 +1769,11 @@ def verify_cashflow():
 
     Request body: { "year": 2026, "month": 6, "fund": "군공" }
 
-    기준값 = SUM(DIRECT_INVESTMENT.AMOUNT_INV) + SUM(FUND_EXPENSE.AMOUNT_EXP), 이 펀드(FUND_CODE)의
-    as-of(연/월) 이하 날짜 항목만. 투자통화가 펀드 약정통화와 다르면 FUND_FX에서 CALL_ID로 매칭되는
-    FX_TYPE="INITIAL" 행의 BUY_RATE_FX로 환산합니다 (= EXECUTED 방식과 동일).
+    기준값 = SUM(DIRECT_INVESTMENT.AMOUNT_INV) + SUM(FUND_EXPENSE.AMOUNT_EXP) + SUM(재간접 펀드 Capital
+    Call 실제 집행 KRW), 이 펀드(FUND_CODE)의 as-of(연/월) 이하 날짜 항목만. 투자통화가 펀드 약정통화와
+    다르면 FUND_FX_BUY에서 CALL_ID로 매칭되는 FX_TYPE="INITIAL" 행의 BUY_RATE_FX로 환산합니다
+    (= EXECUTED 방식과 동일). 재간접(FOF_CALL) 항목은 FUND_FX_BUY의 INITIAL 행에 이미 기록된 실제
+    집행 KRW(BUY_KRW)를 그대로 씁니다 (Fund Cash Flow/Fund Metrics와 동일한 방식).
     """
     clear_data_caches()
     params = request.json or {}
@@ -1816,6 +1818,30 @@ def verify_cashflow():
             continue
         total_invested += converted
 
+    # 재간접(FOF_CALL) - FUND_FX_BUY의 INITIAL 행에 기록된 실제 집행 KRW(BUY_KRW)를 그대로 합산
+    fof_inv_map = {i.get("FOF_INV_ID"): i for i in get_sheet_dicts("FOF_INVESTMENT") if i.get("FUND_CODE") == fund_code}
+    fof_call_to_inv = {
+        c.get("CALL_ID"): c.get("FOF_INV_ID")
+        for c in get_sheet_dicts("FOF_CALL")
+        if c.get("FOF_INV_ID") in fof_inv_map
+    }
+    total_fof_invested = 0.0
+    for fx_row in get_sheet_dicts("FUND_FX_BUY"):
+        if (fx_row.get("FX_TYPE") or "").strip() != "INITIAL":
+            continue
+        if fx_row.get("CALL_ID") not in fof_call_to_inv:
+            continue
+        buy_date = parse_date(fx_row.get("BUY_DATE_FX"))
+        if buy_date and buy_date > as_of:
+            continue
+        converted, warn = convert_amount(
+            parse_number(fx_row.get("BUY_KRW")), "KRW", fund_currency, "SPOT", {}, fund_code, None, as_of, label=fx_row.get("CALL_ID")
+        )
+        if warn:
+            add_fx_warning(warnings, warn)
+            continue
+        total_fof_invested += converted
+
     total_expense = 0.0
     for exp in expenses:
         if exp.get("FUND_CODE") != fund_code:
@@ -1837,9 +1863,9 @@ def verify_cashflow():
     return jsonify({
         "fund_currency": fund_currency,
         "as_of": as_of.isoformat(),
-        "total_invested": total_invested,
+        "total_invested": total_invested + total_fof_invested,
         "total_expense": total_expense,
-        "total_cost": total_invested + total_expense,
+        "total_cost": total_invested + total_fof_invested + total_expense,
         "warnings": format_fx_warnings(warnings),
     })
 
