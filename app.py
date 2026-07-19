@@ -534,6 +534,63 @@ def format_fx_warnings(warnings):
     return messages
 
 
+# 통화별 정상 환율 범위 (통화 1단위 = ? KRW). 벗어나면 오탈자(예: 환율 칸에 금액을 잘못 입력)로 의심합니다.
+# 프론트엔드의 SPOT 환율 입력창 검증(FX_SANITY_RANGE, index.html)과 동일한 값을 사용합니다.
+FX_SANITY_RANGE = {
+    "USD": (1000, 1600),
+    "EUR": (1100, 1800),
+    "GBP": (1300, 2100),
+    "JPY": (6, 12),
+    "CNY": (150, 250),
+}
+
+
+def is_fx_rate_suspicious(currency, rate):
+    """rate가 이 통화의 정상 범위를 벗어나면 True (범위가 정의되지 않은 통화는 항상 False)."""
+    range_ = FX_SANITY_RANGE.get(currency)
+    if not range_ or rate is None:
+        return False
+    return rate < range_[0] or rate > range_[1]
+
+
+def format_rate_sanity_warnings(warnings):
+    """{"USD": ["A", "B"]} -> ["USD 환율 확인 필요(비정상 범위): A, B"] 형태의 문구로 변환합니다."""
+    messages = []
+    for currency in sorted(warnings.keys()):
+        labels = list(dict.fromkeys(l for l in warnings[currency] if l))
+        if labels:
+            messages.append(f"{currency} 환율 확인 필요(비정상 범위): {', '.join(labels)}")
+    return messages
+
+
+def check_fund_fx_rate_sanity(fund_code, call_ids):
+    """
+    이 펀드에서 실제 쓰이는 집행환율(FUND_FX_BUY.BUY_RATE_FX)과 약정일환율(FUND_BASE_FX.BASE_RATE)이
+    통화별 정상 범위를 벗어나면 경고를 생성합니다 - 환율 칸에 금액을 잘못 입력하는 등의 오타를 잡기 위함
+    (예: 환율이 7,500,000처럼 들어가 있으면 실제 계산에 그대로 쓰여 투자금액이 터무니없이 커집니다).
+    call_ids: 이 펀드에서 실제 사용 중인 CALL_ID 집합 (관련 없는 다른 펀드의 오타까지 보고하지 않기 위함)
+    """
+    warnings = {}
+    for row in get_sheet_dicts("FUND_FX_BUY"):
+        call_id = row.get("CALL_ID")
+        if call_id not in call_ids:
+            continue
+        currency = (row.get("FX_CURRENCY_BUY") or "").strip()
+        rate = parse_number(row.get("BUY_RATE_FX"))
+        if is_fx_rate_suspicious(currency, rate):
+            add_fx_warning(warnings, {"currency": currency, "label": f"{call_id}(집행환율 {rate:,.0f})"})
+
+    for row in get_sheet_dicts("FUND_BASE_FX"):
+        if row.get("FUND_CODE") != fund_code:
+            continue
+        currency = (row.get("CURRENCY") or "").strip()
+        rate = parse_number(row.get("BASE_RATE"))
+        if is_fx_rate_suspicious(currency, rate):
+            add_fx_warning(warnings, {"currency": currency, "label": f"약정일환율 {rate:,.0f}"})
+
+    return warnings
+
+
 def get_subscription_currency(fund_code, fund_currency):
     """이 펀드의 약정통화(FUND_SUBSCRIPTION.CURRENCY_SUB)를 반환합니다. 값이 없으면 펀드통화로 폴백합니다."""
     for s in get_sheet_dicts("FUND_SUB"):
@@ -769,7 +826,7 @@ def investment_overview():
     last_day = calendar.monthrange(year, month)[1]
     as_of = date(year, month, last_day)
 
-    rows, warnings = compute_investment_rows(
+    rows, warnings, rate_warnings = compute_investment_rows(
         fund_code, display_fund_currency, as_of, fx_option, fx_rates, markup_option, display_currency, fx_option_other=fx_option_other
     )
 
@@ -778,7 +835,7 @@ def investment_overview():
         "display_currency": display_currency,
         "as_of": as_of.isoformat(),
         "rows": rows,
-        "warnings": format_fx_warnings(warnings),
+        "warnings": format_fx_warnings(warnings) + format_rate_sanity_warnings(rate_warnings),
     })
 
 
@@ -836,6 +893,7 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
 
     rows = []
     warnings = {}
+    rate_warnings = check_fund_fx_rate_sanity(fund_code, {inv.get("CALL_ID") for inv in fund_investments})
 
     for inv in fund_investments:
         call_id = inv.get("CALL_ID")
@@ -987,7 +1045,7 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
             "ownership_asof_estimated": ownership_asof_estimated,
         })
 
-    return rows, warnings
+    return rows, warnings, rate_warnings
 
 
 @app.route('/api/fund-cashflow', methods=['POST'])
@@ -1040,6 +1098,7 @@ def fund_cashflow():
 
     entries = []
     warnings = {}
+    rate_warnings = {}
 
     # Cash Out: DIRECT_INVESTMENT (투자 집행)
     for inv in investments:
@@ -1117,10 +1176,11 @@ def fund_cashflow():
         })
 
     # Cash In: Fund NAV (기준일 기준 모든 투자건의 TOTAL VALUE 합계 - 항상 마지막 항목)
-    nav_rows, nav_warnings = compute_investment_rows(
+    nav_rows, nav_warnings, nav_rate_warnings = compute_investment_rows(
         fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND", fx_option_other=fx_option_other
     )
     merge_fx_warnings(warnings, nav_warnings)
+    merge_fx_warnings(rate_warnings, nav_rate_warnings)
     nav_total = sum(r["total_value"] for r in nav_rows if r.get("total_value") is not None)
 
     entries.append({
@@ -1136,7 +1196,7 @@ def fund_cashflow():
         "fund_currency": fund_currency,
         "as_of": as_of.isoformat(),
         "rows": entries,
-        "warnings": format_fx_warnings(warnings),
+        "warnings": format_fx_warnings(warnings) + format_rate_sanity_warnings(rate_warnings),
     })
 
 
@@ -1179,6 +1239,7 @@ def fund_metrics():
     as_of = date(year, month, last_day)
 
     warnings = {}
+    rate_warnings = {}
 
     def to_fund_currency(amount, native_currency, call_id, method="SPOT", label=None):
         converted, warn = convert_amount(amount, native_currency, fund_currency, method, fx_rates, fund_code, call_id, as_of, label=label)
@@ -1328,8 +1389,9 @@ def fund_metrics():
         distribution_cashflow.append((dist_date, converted))
 
     # ---------- NAV (Investment Overview와 동일 로직 재사용) ----------
-    nav_rows, nav_warnings = compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND", fx_option_other=fx_option_other)
+    nav_rows, nav_warnings, nav_rate_warnings = compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND", fx_option_other=fx_option_other)
     merge_fx_warnings(warnings, nav_warnings)
+    merge_fx_warnings(rate_warnings, nav_rate_warnings)
     nav_total = sum(r["total_value"] for r in nav_rows if r.get("total_value") is not None)
 
     # ---------- INVESTMENT (건수/티켓 사이즈/지분율 등, nav_rows 재사용 - 이미 펀드통화로 환산되어 있음) ----------
@@ -1414,7 +1476,7 @@ def fund_metrics():
             "settlement_gain": settlement_gain_only,
             "settlement_loss": settlement_loss_only,
         },
-        "warnings": format_fx_warnings(warnings),
+        "warnings": format_fx_warnings(warnings) + format_rate_sanity_warnings(rate_warnings),
     })
 
 
