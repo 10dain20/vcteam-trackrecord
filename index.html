@@ -143,6 +143,16 @@
     border-left: 4px solid var(--navy);
   }
 
+  .section-subtitle {
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.005em;
+    padding-left: 10px;
+    margin: 0 0 12px;
+    border-left: 3px solid var(--navy);
+    color: var(--navy);
+  }
+
   section p.desc {
     font-size: 13px;
     color: var(--gray);
@@ -633,24 +643,29 @@
     max-width: 100%;
   }
 
-  #overview-table-wrap {
+  #overview-table-wrap,
+  #fof-overview-table-wrap {
     overflow-x: auto;
   }
 
-  #overview-table-wrap table {
+  #overview-table-wrap table,
+  #fof-overview-table-wrap table {
     font-size: 12px;
     table-layout: fixed;
     border: none;
   }
 
   #overview-table-wrap th,
-  #overview-table-wrap td {
+  #overview-table-wrap td,
+  #fof-overview-table-wrap th,
+  #fof-overview-table-wrap td {
     white-space: normal;
     word-break: keep-all;
     overflow-wrap: break-word;
   }
 
-  #overview-table-wrap thead th {
+  #overview-table-wrap thead th,
+  #fof-overview-table-wrap thead th {
     cursor: pointer;
     user-select: none;
     position: relative;
@@ -658,27 +673,32 @@
     color: #ffffff;
   }
 
-  #overview-table-wrap th .sort-arrow {
+  #overview-table-wrap th .sort-arrow,
+  #fof-overview-table-wrap th .sort-arrow {
     display: inline-block;
     margin-left: 4px;
     color: #999999;
     font-size: 10px;
   }
 
-  #overview-table-wrap th.sorted .sort-arrow {
+  #overview-table-wrap th.sorted .sort-arrow,
+  #fof-overview-table-wrap th.sorted .sort-arrow {
     color: #ffffff;
   }
 
-  #overview-table-wrap td.num {
+  #overview-table-wrap td.num,
+  #fof-overview-table-wrap td.num {
     text-align: right;
     font-variant-numeric: tabular-nums;
   }
 
-  #overview-table-wrap tbody td:first-child {
+  #overview-table-wrap tbody td:first-child,
+  #fof-overview-table-wrap tbody td:first-child {
     background: #f5f5f5;
   }
 
-  #overview-table-wrap tr.overview-sum-row td {
+  #overview-table-wrap tr.overview-sum-row td,
+  #fof-overview-table-wrap tr.overview-sum-row td {
     font-weight: 700;
     border-top: 2px solid #000000;
     background: #f5f5f5;
@@ -960,9 +980,16 @@
 
           <div id="overview-warnings"></div>
 
-          <div class="table-card"><div id="overview-table-wrap"></div></div>
+          <div id="direct-overview-section">
+            <div class="table-card"><div id="overview-table-wrap"></div></div>
+            <p class="ownership-note">* 전환형 투자로 전환 시 예상 지분율</p>
+          </div>
 
-          <p class="ownership-note">* 전환형 투자로 전환 시 예상 지분율</p>
+          <!-- 재간접(Fund of Funds) 투자 - 프로젝트 펀드처럼 직투 건이 없고 FOF_INVESTMENT만 있는 펀드용 -->
+          <div id="fof-overview-section" style="display: none; margin-top: 24px;">
+            <h3 class="section-subtitle" id="fof-overview-title">재간접(Fund of Funds) 투자</h3>
+            <div class="table-card"><div id="fof-overview-table-wrap"></div></div>
+          </div>
         </div>
 
         <!-- Fund Cash Flow -->
@@ -1114,6 +1141,10 @@
     let overviewRows = [];
     let overviewFundCurrency = "KRW";
     let sortState = { key: null, dir: 1 };
+
+    // 재간접(FoF) 투자 Overview 정렬/렌더링용 상태
+    let fofOverviewRows = [];
+    let fofSortState = { key: null, dir: 1 };
 
     // Fund Cash Flow 정렬/렌더링용 상태
     let cashflowRows = [];
@@ -1578,12 +1609,21 @@
       overviewRows = cached.rows;
       overviewFundCurrency = cached.fund_currency;
       sortState = { key: null, dir: 1 };
+      fofOverviewRows = cached.fof_rows || [];
+      fofSortState = { key: null, dir: 1 };
 
       warningsEl.innerHTML = cached.warnings && cached.warnings.length > 0
         ? cached.warnings.map((w) => `<div class="overview-warning">⚠ ${escapeHtml(w)}</div>`).join("")
         : "";
 
+      // 직투 건이 있는 펀드는 기존 표를, 재간접(FoF)만 있는 프로젝트 펀드는 FoF 표를 보여줍니다
+      // (두 유형을 동시에 가진 펀드는 현재 없지만, 있다면 둘 다 표시됩니다. 아무 것도 없으면
+      // 기존 "해당 조건의 투자 건이 없습니다" 메시지가 보이도록 직투 표시 영역은 남겨둡니다).
+      document.getElementById("direct-overview-section").style.display = fofOverviewRows.length > 0 && overviewRows.length === 0 ? "none" : "block";
+      document.getElementById("fof-overview-section").style.display = fofOverviewRows.length > 0 ? "block" : "none";
+
       renderOverviewTable();
+      renderFofOverviewTable();
     }
 
     async function loadInvestmentOverview() {
@@ -1761,29 +1801,178 @@
       });
     }
 
+    // 재간접(FoF) 투자 Overview - 프로젝트 펀드(예: 벤2가 DCVC V, L.P.에 투자)용 표.
+    // 직투 표와 컬럼이 달라(지분율 없음, 약정금액 있음) 별도 렌더링 함수를 둡니다.
+    const FOF_OVERVIEW_COL_WIDTH = {
+      fund_name: "18%",
+      country: "8%",
+      currency_inv: "8%",
+      date_inv: "9%",
+      commitment_amount: "9.5%",
+      amount_called: "9.5%",
+      remaining_balance: "9.5%",
+      realized: "9.5%",
+      unrealized: "9.5%",
+      total_value: "9.5%",
+      moic: "9.5%",
+    };
+
+    function getFofOverviewColumns() {
+      return [
+        { key: "fund_name", label: "펀드명", type: "text" },
+        { key: "country", label: "국가", type: "text" },
+        { key: "currency_inv", label: "투자통화", type: "text" },
+        { key: "date_inv", label: "투자시점", type: "date" },
+        { key: "commitment_amount", label: "약정금액", type: "currency" },
+        { key: "amount_called", label: "투자금액", type: "currency" },
+        { key: "remaining_balance", label: "투자잔액", type: "currency" },
+        { key: "realized", label: "REALIZED", type: "currency" },
+        { key: "unrealized", label: "UNREALIZED", type: "currency" },
+        { key: "total_value", label: "TOTAL VALUE", type: "currency" },
+        { key: "moic", label: "MOIC", type: "moic" },
+      ];
+    }
+
+    function renderFofOverviewTable() {
+      const tableWrap = document.getElementById("fof-overview-table-wrap");
+      if (!tableWrap) return;
+
+      if (fofOverviewRows.length === 0) {
+        tableWrap.innerHTML = "";
+        return;
+      }
+
+      const rows = [...fofOverviewRows];
+      if (fofSortState.key) {
+        rows.sort((a, b) => {
+          let va = a[fofSortState.key];
+          let vb = b[fofSortState.key];
+          if (va === null || va === undefined) va = -Infinity;
+          if (vb === null || vb === undefined) vb = -Infinity;
+          if (typeof va === "string") {
+            return va.localeCompare(vb) * fofSortState.dir;
+          }
+          return (va - vb) * fofSortState.dir;
+        });
+      }
+
+      const columns = getFofOverviewColumns();
+
+      let html = "<table><thead><tr>";
+      columns.forEach((col) => {
+        const isSorted = fofSortState.key === col.key;
+        const arrow = isSorted ? (fofSortState.dir === 1 ? "▲" : "▼") : "▲▼";
+        const width = FOF_OVERVIEW_COL_WIDTH[col.key] || "";
+        html += `<th data-key="${col.key}" class="${isSorted ? "sorted" : ""}" style="width: ${width}">${col.label}<span class="sort-arrow">${arrow}</span></th>`;
+      });
+      html += "</tr></thead><tbody>";
+
+      rows.forEach((row) => {
+        html += "<tr>";
+        columns.forEach((col) => {
+          const val = row[col.key];
+          let cellContent;
+          let cellClass = "";
+
+          if (col.type === "text" || col.type === "date") {
+            cellContent = val || "-";
+          } else if (col.type === "currency") {
+            cellContent = formatCurrencyDisplay(val, row.display_currency);
+            cellClass = "num";
+          } else if (col.type === "moic") {
+            cellContent = formatMoic(val);
+            cellClass = "num";
+          }
+
+          html += `<td class="${cellClass}">${cellContent}</td>`;
+        });
+        html += "</tr>";
+      });
+
+      // 펀드통화 모드에서만 합계 행 표시 (투자통화 모드는 행마다 통화가 섞여있어 합산 의미가 없음)
+      if (displayCurrencyMode === "FUND") {
+        html += '<tr class="overview-sum-row">';
+        columns.forEach((col, idx) => {
+          let cellContent = "-";
+          let cellClass = "";
+
+          if (idx === 0) {
+            cellContent = "합계";
+          } else if (col.type === "currency") {
+            const sum = rows.reduce((acc, r) => acc + (r[col.key] || 0), 0);
+            cellContent = formatCurrencyDisplay(sum, overviewFundCurrency);
+            cellClass = "num";
+          } else if (col.type === "moic") {
+            const sumTotalValue = rows.reduce((acc, r) => acc + (r.total_value || 0), 0);
+            const sumAmountCalled = rows.reduce((acc, r) => acc + (r.amount_called || 0), 0);
+            cellContent = sumAmountCalled ? formatMoic(sumTotalValue / sumAmountCalled) : "-";
+            cellClass = "num";
+          }
+
+          html += `<td class="${cellClass}">${cellContent}</td>`;
+        });
+        html += "</tr>";
+      }
+
+      html += "</tbody></table>";
+      tableWrap.innerHTML = html;
+
+      tableWrap.querySelectorAll("th").forEach((th) => {
+        th.addEventListener("click", () => {
+          const key = th.getAttribute("data-key");
+          if (fofSortState.key === key) {
+            fofSortState.dir *= -1;
+          } else {
+            fofSortState.key = key;
+            fofSortState.dir = 1;
+          }
+          renderFofOverviewTable();
+        });
+      });
+    }
+
     // Export to Excel (원본 값 그대로, * 표기 제외)
     document.getElementById("btn-export").addEventListener("click", () => {
-      if (overviewRows.length === 0) return;
+      if (overviewRows.length === 0 && fofOverviewRows.length === 0) return;
 
-      const exportData = overviewRows.map((row) => ({
-        "기업명": row.company_name || "",
-        "국가": row.company_country || "",
-        "투자통화": row.currency_inv || "",
-        "표시통화": row.display_currency || "",
-        "투자시점": row.date_inv || "",
-        "투자금액": row.amount_inv,
-        "투자잔액": row.remaining_balance,
-        "REALIZED": row.realized,
-        "UNREALIZED": row.unrealized,
-        "TOTAL VALUE": row.total_value,
-        "MOIC": row.moic,
-        "지분율(투자당시)(%)": row.ownership_investment_pct,
-        [`${getOverviewAsOfLabel()}(%)`]: row.ownership_asof_pct,
-      }));
-
-      const ws = XLSX.utils.json_to_sheet(exportData);
       const wb = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(wb, ws, "Investment Overview");
+
+      if (overviewRows.length > 0) {
+        const exportData = overviewRows.map((row) => ({
+          "기업명": row.company_name || "",
+          "국가": row.company_country || "",
+          "투자통화": row.currency_inv || "",
+          "표시통화": row.display_currency || "",
+          "투자시점": row.date_inv || "",
+          "투자금액": row.amount_inv,
+          "투자잔액": row.remaining_balance,
+          "REALIZED": row.realized,
+          "UNREALIZED": row.unrealized,
+          "TOTAL VALUE": row.total_value,
+          "MOIC": row.moic,
+          "지분율(투자당시)(%)": row.ownership_investment_pct,
+          [`${getOverviewAsOfLabel()}(%)`]: row.ownership_asof_pct,
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(exportData), "Investment Overview");
+      }
+
+      if (fofOverviewRows.length > 0) {
+        const fofExportData = fofOverviewRows.map((row) => ({
+          "펀드명": row.fund_name || "",
+          "국가": row.country || "",
+          "투자통화": row.currency_inv || "",
+          "표시통화": row.display_currency || "",
+          "투자시점": row.date_inv || "",
+          "약정금액": row.commitment_amount,
+          "투자금액": row.amount_called,
+          "투자잔액": row.remaining_balance,
+          "REALIZED": row.realized,
+          "UNREALIZED": row.unrealized,
+          "TOTAL VALUE": row.total_value,
+          "MOIC": row.moic,
+        }));
+        XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(fofExportData), "FoF Investment");
+      }
 
       const fundLabel = lastConfirmedParams ? lastConfirmedParams.fund : "fund";
       const dateLabel = lastConfirmedParams ? `${lastConfirmedParams.year}${String(lastConfirmedParams.month).padStart(2, "0")}` : "";

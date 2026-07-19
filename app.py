@@ -829,12 +829,17 @@ def investment_overview():
     rows, warnings, rate_warnings = compute_investment_rows(
         fund_code, display_fund_currency, as_of, fx_option, fx_rates, markup_option, display_currency, fx_option_other=fx_option_other
     )
+    fof_rows, fof_warnings = compute_fof_investment_rows(
+        fund_code, display_fund_currency, as_of, fx_option, fx_rates, display_currency, fx_option_other=fx_option_other
+    )
+    merge_fx_warnings(warnings, fof_warnings)
 
     return jsonify({
         "fund_currency": display_fund_currency,
         "display_currency": display_currency,
         "as_of": as_of.isoformat(),
         "rows": rows,
+        "fof_rows": fof_rows,
         "warnings": format_fx_warnings(warnings) + format_rate_sanity_warnings(rate_warnings),
     })
 
@@ -1048,6 +1053,162 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
     return rows, warnings, rate_warnings
 
 
+def compute_fof_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, display_currency, fx_option_other=None):
+    """
+    재간접(FoF) 투자 건별 계산 로직입니다 (예: 벤2가 DCVC V, L.P.에 투자한 경우).
+    FOF_FUND=투자 대상 재간접 펀드 정보(DIRECT_COMPANY 역할), FOF_INVESTMENT=이 펀드의 투자건
+    (DIRECT_INVESTMENT 역할), FOF_CALL=재간접 펀드에서 발생한 Capital Call, FOF_DIST=Distribution,
+    FOF_CAS=해외 펀드가 발행한 Capital Account Statement(평가금액, 우리가 콜한 금액에 대한 평가).
+
+    - 투자금액(Capital Called) = as_of 이하 FOF_CALL 누적
+    - 투자잔액(원가 기준) = 투자금액 - as_of 이하 RETURN_OF_CAPITAL 누적
+    - REALIZED = as_of 이하 TOTAL_DISTRIBUTION 누적 (원본상환+이익분배금+재투자 전체)
+    - UNREALIZED = as_of 이하 최신 FOF_CAS 평가금액 + (그 CAS 기준일 이후 ~ as_of에 발생한 콜은 아직
+      CAS에 반영되지 않았으므로 원가로 가산). CAS가 아예 없으면 콜한 원가 전체를 평가금액으로 봄.
+    - TOTAL VALUE = REALIZED + UNREALIZED, MOIC = TOTAL VALUE / 투자금액
+    """
+    fof_fund_map = {f.get("FOF_CODE"): f for f in get_sheet_dicts("FOF_FUND")}
+
+    calls_by_inv = {}
+    for c in get_sheet_dicts("FOF_CALL"):
+        d = parse_date(c.get("DATE_CALL"))
+        if d:
+            calls_by_inv.setdefault(c.get("FOF_INV_ID"), []).append((d, c))
+
+    dists_by_inv = {}
+    for d_row in get_sheet_dicts("FOF_DIST"):
+        d = parse_date(d_row.get("DATE_DIST"))
+        if d:
+            dists_by_inv.setdefault(d_row.get("FOF_INV_ID"), []).append((d, d_row))
+
+    cas_by_inv = {}
+    for c in get_sheet_dicts("FOF_CAS"):
+        d = parse_date(c.get("DATE_CAS"))
+        if d:
+            cas_by_inv.setdefault(c.get("FOF_INV_ID"), []).append((d, c))
+
+    fund_fof_investments = [inv for inv in get_sheet_dicts("FOF_INVESTMENT") if inv.get("FUND_CODE") == fund_code]
+
+    rows = []
+    warnings = {}
+
+    for inv in fund_fof_investments:
+        fof_inv_id = inv.get("FOF_INV_ID")
+        fof_fund = fof_fund_map.get(inv.get("FOF_ID"), {})
+        fund_label = fof_fund.get("FOF_NAME") or inv.get("FOF_ID")
+        native_currency = (inv.get("FOF_INV_CURRENCY") or "").strip()
+        target_currency = native_currency if display_currency == "NATIVE" else fund_currency
+
+        call_list = sorted((dc for dc in calls_by_inv.get(fof_inv_id, []) if dc[0] <= as_of), key=lambda dc: dc[0])
+        if not call_list:
+            continue  # as_of 시점에 아직 콜이 발생하지 않음 (투자 시작 전)
+
+        date_inv = call_list[0][0]
+
+        # 투자금액(Capital Called): FOF_CALL은 CALL_ID가 없어 집행환율을 적용할 수 없으므로 대체환율 사용
+        amount_called = 0.0
+        for call_date, call_row in call_list:
+            call_currency = (call_row.get("CURRENCY_CALL") or "").strip() or native_currency
+            call_amount = parse_number(call_row.get("AMOUNT_CALL"))
+            converted, warn = convert_amount_with_fallback(
+                call_amount, call_currency, target_currency, fx_option, fx_option_other, fx_rates, fund_code, None, as_of, label=fund_label
+            )
+            if warn:
+                add_fx_warning(warnings, warn)
+                continue
+            amount_called += converted
+
+        # 약정금액
+        commitment_amount, commit_warn = convert_amount_with_fallback(
+            parse_number(inv.get("FOF_INV_AMT")), native_currency, target_currency, fx_option, fx_option_other, fx_rates, fund_code, None, as_of, label=fund_label
+        )
+        if commit_warn:
+            add_fx_warning(warnings, commit_warn)
+            commitment_amount = None
+
+        # 분배 내역 (REALIZED = TOTAL_DISTRIBUTION 누적, 투자잔액용 RETURN_OF_CAPITAL 누적)
+        # REALIZED/UNREALIZED은 투자금액 계산 방식과 무관하게 항상 SPOT 환율을 사용합니다 (직투 로직과 동일)
+        dist_list = [(d, r) for d, r in dists_by_inv.get(fof_inv_id, []) if d <= as_of]
+        realized_total = 0.0
+        return_of_capital_total = 0.0
+        dist_conversion_failed = False
+        for dist_date, dist_row in dist_list:
+            dist_currency = (dist_row.get("CURRENCY_DIST") or "").strip() or native_currency
+            real_target = dist_currency if display_currency == "NATIVE" else fund_currency
+
+            converted_total, warn = convert_amount(
+                parse_number(dist_row.get("TOTAL_DISTRIBUTION")), dist_currency, real_target, "SPOT", fx_rates, fund_code, None, as_of, label=fund_label
+            )
+            if warn:
+                add_fx_warning(warnings, warn)
+                dist_conversion_failed = True
+                continue
+            realized_total += converted_total
+
+            converted_roc, roc_warn = convert_amount(
+                parse_number(dist_row.get("RETURN_OF_CAPITAL")), dist_currency, real_target, "SPOT", fx_rates, fund_code, None, as_of, label=fund_label
+            )
+            if not roc_warn:
+                return_of_capital_total += converted_roc
+
+        # 투자잔액 = 투자금액(원가) - 회수된 원금(RETURN_OF_CAPITAL)
+        remaining_balance = amount_called - return_of_capital_total
+
+        # UNREALIZED: 최신 CAS 평가금액 + (그 이후 ~ as_of까지 발생한 콜은 아직 미반영이므로 원가로 가산)
+        cas_list = sorted((dc for dc in cas_by_inv.get(fof_inv_id, []) if dc[0] <= as_of), key=lambda dc: dc[0])
+        unrealized = None
+        if cas_list:
+            latest_cas_date, latest_cas_row = cas_list[-1]
+            cas_currency = (latest_cas_row.get("CURRENCY_CAS") or "").strip() or native_currency
+            cas_amount = parse_number(latest_cas_row.get("AMOUNT_CAS"))
+            uncalled_since_cas = sum(
+                parse_number(c.get("AMOUNT_CALL")) for call_date, c in call_list if call_date > latest_cas_date
+            )
+            unrealized_target = cas_currency if display_currency == "NATIVE" else fund_currency
+            converted_unrealized, unrealized_warn = convert_amount(
+                cas_amount + uncalled_since_cas, cas_currency, unrealized_target, "SPOT", fx_rates, fund_code, None, as_of, label=fund_label
+            )
+            if unrealized_warn:
+                add_fx_warning(warnings, unrealized_warn)
+            else:
+                unrealized = converted_unrealized
+        else:
+            # CAS가 아직 한 번도 없으면 콜한 원가 전체를 평가금액으로 봅니다.
+            unrealized_target = native_currency if display_currency == "NATIVE" else fund_currency
+            converted_unrealized, unrealized_warn = convert_amount_with_fallback(
+                amount_called, native_currency, unrealized_target, fx_option, fx_option_other, fx_rates, fund_code, None, as_of, label=fund_label
+            )
+            if unrealized_warn:
+                add_fx_warning(warnings, unrealized_warn)
+            else:
+                unrealized = converted_unrealized
+
+        total_value = None
+        moic = None
+        if not dist_conversion_failed and unrealized is not None:
+            total_value = realized_total + unrealized
+            if amount_called:
+                moic = total_value / amount_called
+
+        rows.append({
+            "fof_inv_id": fof_inv_id,
+            "fund_name": fund_label,
+            "country": fof_fund.get("FOF_COUNTRY"),
+            "currency_inv": native_currency,
+            "display_currency": target_currency,
+            "date_inv": date_inv.isoformat(),
+            "commitment_amount": commitment_amount,
+            "amount_called": amount_called,
+            "remaining_balance": remaining_balance,
+            "realized": None if dist_conversion_failed else realized_total,
+            "unrealized": unrealized,
+            "total_value": total_value,
+            "moic": moic,
+        })
+
+    return rows, warnings
+
+
 @app.route('/api/fund-cashflow', methods=['POST'])
 def fund_cashflow():
     """
@@ -1150,6 +1311,62 @@ def fund_cashflow():
             "type": "expense",
         })
 
+    # Cash Out: FOF_CALL (재간접 펀드 Capital Call - CALL_ID가 없어 집행환율 적용 불가하므로 대체환율 사용)
+    fof_fund_map = {f.get("FOF_CODE"): f for f in get_sheet_dicts("FOF_FUND")}
+    fof_inv_map = {i.get("FOF_INV_ID"): i for i in get_sheet_dicts("FOF_INVESTMENT") if i.get("FUND_CODE") == fund_code}
+    for call_row in get_sheet_dicts("FOF_CALL"):
+        fof_inv = fof_inv_map.get(call_row.get("FOF_INV_ID"))
+        if not fof_inv:
+            continue
+        call_date = parse_date(call_row.get("DATE_CALL"))
+        if call_date and call_date > as_of:
+            continue
+
+        fof_fund = fof_fund_map.get(fof_inv.get("FOF_ID"), {})
+        fund_label = fof_fund.get("FOF_NAME") or fof_inv.get("FOF_ID")
+        call_currency = (call_row.get("CURRENCY_CALL") or "").strip() or (fof_inv.get("FOF_INV_CURRENCY") or "").strip()
+        amount_call = parse_number(call_row.get("AMOUNT_CALL"))
+        converted, warn = convert_amount_with_fallback(
+            amount_call, call_currency, fund_currency, fx_option, fx_option_other, fx_rates, fund_code, None, as_of, label=fund_label
+        )
+        if warn:
+            add_fx_warning(warnings, warn)
+            continue
+
+        entries.append({
+            "date": format_date_iso(call_row.get("DATE_CALL")),
+            "amount": -converted,
+            "note": fund_label,
+            "type": "fof_call",
+        })
+
+    # Cash In: FOF_DIST (재간접 펀드 분배 - CALL_ID가 없어 항상 대체환율/SPOT 사용)
+    for dist_row in get_sheet_dicts("FOF_DIST"):
+        fof_inv = fof_inv_map.get(dist_row.get("FOF_INV_ID"))
+        if not fof_inv:
+            continue
+        dist_date = parse_date(dist_row.get("DATE_DIST"))
+        if dist_date and dist_date > as_of:
+            continue
+
+        fof_fund = fof_fund_map.get(fof_inv.get("FOF_ID"), {})
+        fund_label = fof_fund.get("FOF_NAME") or fof_inv.get("FOF_ID")
+        dist_currency = (dist_row.get("CURRENCY_DIST") or "").strip() or (fof_inv.get("FOF_INV_CURRENCY") or "").strip()
+        amount_dist = parse_number(dist_row.get("TOTAL_DISTRIBUTION"))
+        converted, warn = convert_amount_with_fallback(
+            amount_dist, dist_currency, fund_currency, fx_option, fx_option_other, fx_rates, fund_code, None, as_of, label=fund_label
+        )
+        if warn:
+            add_fx_warning(warnings, warn)
+            continue
+
+        entries.append({
+            "date": format_date_iso(dist_row.get("DATE_DIST")),
+            "amount": converted,
+            "note": fund_label,
+            "type": "fof_distribution",
+        })
+
     # Cash In: FUND_DISTRIBUTION (분배)
     for dist in distributions:
         if dist.get("FUND_CODE") != fund_code:
@@ -1175,13 +1392,19 @@ def fund_cashflow():
             "type": "distribution",
         })
 
-    # Cash In: Fund NAV (기준일 기준 모든 투자건의 TOTAL VALUE 합계 - 항상 마지막 항목)
+    # Cash In: Fund NAV (기준일 기준 모든 투자건의 TOTAL VALUE 합계 - 항상 마지막 항목, 직투+재간접 합산)
     nav_rows, nav_warnings, nav_rate_warnings = compute_investment_rows(
         fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND", fx_option_other=fx_option_other
     )
     merge_fx_warnings(warnings, nav_warnings)
     merge_fx_warnings(rate_warnings, nav_rate_warnings)
     nav_total = sum(r["total_value"] for r in nav_rows if r.get("total_value") is not None)
+
+    fof_nav_rows, fof_nav_warnings = compute_fof_investment_rows(
+        fund_code, fund_currency, as_of, fx_option, fx_rates, "FUND", fx_option_other=fx_option_other
+    )
+    merge_fx_warnings(warnings, fof_nav_warnings)
+    nav_total += sum(r["total_value"] for r in fof_nav_rows if r.get("total_value") is not None)
 
     entries.append({
         "date": as_of.isoformat(),
@@ -1315,6 +1538,30 @@ def fund_metrics():
         total_invested += converted
         investment_cashflow.append((parse_date(inv.get("DATE_INV")), -converted))
 
+    # ---------- FOF_CALL (재간접 펀드 Capital Call - 직투와 동일하게 투자금/Capital Called에 합산) ----------
+    fof_fund_map = {f.get("FOF_CODE"): f for f in get_sheet_dicts("FOF_FUND")}
+    fof_inv_map = {i.get("FOF_INV_ID"): i for i in get_sheet_dicts("FOF_INVESTMENT") if i.get("FUND_CODE") == fund_code}
+    total_fof_called = 0.0
+    for call_row in get_sheet_dicts("FOF_CALL"):
+        fof_inv = fof_inv_map.get(call_row.get("FOF_INV_ID"))
+        if not fof_inv:
+            continue
+        call_date = parse_date(call_row.get("DATE_CALL"))
+        if call_date and call_date > as_of:
+            continue
+        fof_fund = fof_fund_map.get(fof_inv.get("FOF_ID"), {})
+        fund_label = fof_fund.get("FOF_NAME") or fof_inv.get("FOF_ID")
+        call_currency = (call_row.get("CURRENCY_CALL") or "").strip() or (fof_inv.get("FOF_INV_CURRENCY") or "").strip()
+        amount_call = parse_number(call_row.get("AMOUNT_CALL"))
+        converted, warn = convert_amount_with_fallback(
+            amount_call, call_currency, fund_currency, fx_option, fx_option_other, fx_rates, fund_code, None, as_of, label=fund_label
+        )
+        if warn:
+            add_fx_warning(warnings, warn)
+            continue
+        total_fof_called += converted
+        investment_cashflow.append((call_date, -converted))
+
     total_fund_expense = 0.0
     expense_cashflow = []  # (date, -amount) for Net IRR
     settlement_gain_only = 0.0  # Hedge 카드용: 정산익 = SETTLEMENT GAIN 항목만
@@ -1339,7 +1586,7 @@ def fund_metrics():
         elif expense_type == "SETTLEMENT LOSS":
             settlement_loss_only += -converted
 
-    capital_called = total_invested + total_fund_expense
+    capital_called = total_invested + total_fof_called + total_fund_expense
 
     # ---------- REALIZATION: TXN_TYPE_REAL별 ----------
     realized_by_type = {"장내매각": 0.0, "장외매각": 0.0, "이자수령": 0.0}
@@ -1388,19 +1635,42 @@ def fund_metrics():
         total_distributions += converted
         distribution_cashflow.append((dist_date, converted))
 
-    # ---------- NAV (Investment Overview와 동일 로직 재사용) ----------
+    # ---------- FOF_DIST (재간접 펀드 분배) ----------
+    for dist_row in get_sheet_dicts("FOF_DIST"):
+        fof_inv = fof_inv_map.get(dist_row.get("FOF_INV_ID"))
+        if not fof_inv:
+            continue
+        dist_date = parse_date(dist_row.get("DATE_DIST"))
+        if dist_date and dist_date > as_of:
+            continue
+        fof_fund = fof_fund_map.get(fof_inv.get("FOF_ID"), {})
+        fund_label = fof_fund.get("FOF_NAME") or fof_inv.get("FOF_ID")
+        dist_currency = (dist_row.get("CURRENCY_DIST") or "").strip() or (fof_inv.get("FOF_INV_CURRENCY") or "").strip()
+        converted = to_fund_currency(parse_number(dist_row.get("TOTAL_DISTRIBUTION")), dist_currency, None, label=fund_label)
+        if converted is None:
+            continue
+        total_distributions += converted
+        distribution_cashflow.append((dist_date, converted))
+
+    # ---------- NAV (Investment Overview와 동일 로직 재사용, 직투+재간접 합산) ----------
     nav_rows, nav_warnings, nav_rate_warnings = compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, markup_option, "FUND", fx_option_other=fx_option_other)
     merge_fx_warnings(warnings, nav_warnings)
     merge_fx_warnings(rate_warnings, nav_rate_warnings)
     nav_total = sum(r["total_value"] for r in nav_rows if r.get("total_value") is not None)
 
+    fof_nav_rows, fof_nav_warnings = compute_fof_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates, "FUND", fx_option_other=fx_option_other)
+    merge_fx_warnings(warnings, fof_nav_warnings)
+    nav_total += sum(r["total_value"] for r in fof_nav_rows if r.get("total_value") is not None)
+
     # ---------- INVESTMENT (건수/티켓 사이즈/지분율 등, nav_rows 재사용 - 이미 펀드통화로 환산되어 있음) ----------
+    # 지분율/포트폴리오 기업 수는 직투에만 있는 개념이라 재간접 투자는 제외하고, 건수/티켓사이즈는 합산합니다.
     investment_amounts = [r["amount_inv"] for r in nav_rows if r.get("amount_inv") is not None]
+    investment_amounts += [r["amount_called"] for r in fof_nav_rows if r.get("amount_called") is not None]
     ownership_values = [r["ownership_asof_pct"] for r in nav_rows if r.get("ownership_asof_pct") is not None]
     portfolio_companies = len({inv.get("COMPANY_ID") for inv in fund_investments})
 
     investment_metrics = {
-        "deal_count": len(fund_investments),
+        "deal_count": len(fund_investments) + len(fof_nav_rows),
         "portfolio_companies": portfolio_companies,
         "min_ticket_size": min(investment_amounts) if investment_amounts else None,
         "avg_ticket_size": (sum(investment_amounts) / len(investment_amounts)) if investment_amounts else None,
@@ -1409,7 +1679,7 @@ def fund_metrics():
     }
 
     # ---------- MOIC ----------
-    moic_gross = nav_total / total_invested if total_invested else None
+    moic_gross = nav_total / (total_invested + total_fof_called) if (total_invested + total_fof_called) else None
     moic_net = (nav_total + total_distributions) / capital_called if capital_called else None
 
     # ---------- IRR (XIRR) ----------
@@ -1418,14 +1688,15 @@ def fund_metrics():
     irr_gross = calculate_xirr(gross_cf)
     irr_net = calculate_xirr(net_cf)
 
-    # ---------- DEPLOYMENT ----------
+    # ---------- DEPLOYMENT (직투+재간접 Capital Call 합산) ----------
+    invested_total = total_invested + total_fof_called
     deployment = {
         "capital_called": capital_called,
-        "invested": total_invested,
+        "invested": invested_total,
         "fund_expense": total_fund_expense,
-        "remaining_commitment_excl_fee": (commitment_total - total_invested) if commitment_total else None,
+        "remaining_commitment_excl_fee": (commitment_total - invested_total) if commitment_total else None,
         "remaining_commitment_incl_fee": (commitment_total - capital_called) if commitment_total else None,
-        "deployment_rate_excl_fee": (total_invested / commitment_total * 100) if commitment_total else None,
+        "deployment_rate_excl_fee": (invested_total / commitment_total * 100) if commitment_total else None,
         "deployment_rate_incl_fee": (capital_called / commitment_total * 100) if commitment_total else None,
     }
 
