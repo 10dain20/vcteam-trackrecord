@@ -233,11 +233,14 @@ def resolve_investment_tranches(inv, call_conversions):
             continue  # 일치하는 트랜치가 없으면(데이터 불일치) 적용하지 않음
         target[0] = (conv.get("SECURITY_TYPE_POST_CONV") or "").strip() or target[0]
         target[3] = (conv.get("CURRENCY_CONV") or "").strip() or target[3]
-        # 빈 칸이면 아직 확정 전이므로 이전 값을 유지합니다 (parse_number의 0 폴백 방지).
+        # 전환은 현금 재투입이 아니므로 취득원가(총액)를 그대로 보존합니다 - PRICE_PER_SHARE_CONV를
+        # 새 취득단가로 쓰지 않고, 주수가 바뀐 만큼만 단가를 재계산합니다 (총원가 = 주수 x 단가 불변).
+        # 빈 칸(SHARES_CONV 미기재)이면 아직 확정 전이므로 이전 값을 그대로 유지합니다.
         if has_value(conv.get("SHARES_CONV")):
-            target[1] = parse_number(conv.get("SHARES_CONV"))
-        if has_value(conv.get("PRICE_PER_SHARE_CONV")):
-            target[2] = parse_number(conv.get("PRICE_PER_SHARE_CONV"))
+            new_shares = parse_number(conv.get("SHARES_CONV"))
+            if new_shares:
+                target[2] = (target[1] * target[2]) / new_shares
+            target[1] = new_shares
 
     return tranches
 
