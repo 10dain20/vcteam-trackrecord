@@ -576,17 +576,21 @@ def calculate_xirr(cashflows, guess=0.1):
         return sum(-t * a / (1 + rate) ** (t + 1) for a, t in zip(amounts, years))
 
     rate = guess
-    for _ in range(100):
-        f = npv(rate)
-        df = npv_derivative(rate)
-        if df == 0:
-            return None
-        new_rate = rate - f / df
-        if new_rate <= -0.999:
-            new_rate = -0.999
-        if abs(new_rate - rate) < 1e-7:
-            return new_rate
-        rate = new_rate
+    try:
+        for _ in range(100):
+            f = npv(rate)
+            df = npv_derivative(rate)
+            if df == 0:
+                return None
+            new_rate = rate - f / df
+            # 뉴턴법이 극단적인 값으로 발산하면(현금흐름이 병적인 경우) 안전한 범위로 clamp합니다
+            # (clamp 없이는 (1+rate)**t가 오버플로되어 전체 요청이 500 에러로 죽을 수 있음).
+            new_rate = max(-0.999, min(new_rate, 1e6))
+            if abs(new_rate - rate) < 1e-7:
+                return new_rate
+            rate = new_rate
+    except (OverflowError, ZeroDivisionError, ValueError):
+        return None
 
     return None
 
