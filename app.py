@@ -1311,30 +1311,37 @@ def fund_cashflow():
             "type": "expense",
         })
 
-    # Cash Out: FOF_CALL (재간접 펀드 Capital Call - CALL_ID가 없어 집행환율 적용 불가하므로 대체환율 사용)
+    # Cash Out: FOF_CALL 대응 FUND_FX_BUY(FX_TYPE=INITIAL) - 재간접 펀드 Capital Call 시 실제로
+    # 집행된 KRW 금액(BUY_KRW)을 그대로 씁니다. FOF_CALL.AMOUNT_CALL(외화 표시 콜 금액)을 별도
+    # 환율로 재계산하면 실제 집행 당시 환율과 달라지므로, 실거래 기록인 FUND_FX_BUY를 사용합니다.
     fof_fund_map = {f.get("FOF_CODE"): f for f in get_sheet_dicts("FOF_FUND")}
     fof_inv_map = {i.get("FOF_INV_ID"): i for i in get_sheet_dicts("FOF_INVESTMENT") if i.get("FUND_CODE") == fund_code}
-    for call_row in get_sheet_dicts("FOF_CALL"):
-        fof_inv = fof_inv_map.get(call_row.get("FOF_INV_ID"))
-        if not fof_inv:
+    fof_call_to_inv = {
+        c.get("CALL_ID"): c.get("FOF_INV_ID")
+        for c in get_sheet_dicts("FOF_CALL")
+        if c.get("FOF_INV_ID") in fof_inv_map
+    }
+    for fx_row in get_sheet_dicts("FUND_FX_BUY"):
+        if (fx_row.get("FX_TYPE") or "").strip() != "INITIAL":
             continue
-        call_date = parse_date(call_row.get("DATE_CALL"))
-        if call_date and call_date > as_of:
+        fof_inv_id = fof_call_to_inv.get(fx_row.get("CALL_ID"))
+        if not fof_inv_id:
+            continue
+        buy_date = parse_date(fx_row.get("BUY_DATE_FX"))
+        if buy_date and buy_date > as_of:
             continue
 
+        fof_inv = fof_inv_map[fof_inv_id]
         fof_fund = fof_fund_map.get(fof_inv.get("FOF_ID"), {})
         fund_label = fof_fund.get("FOF_NAME") or fof_inv.get("FOF_ID")
-        call_currency = (call_row.get("CURRENCY_CALL") or "").strip() or (fof_inv.get("FOF_INV_CURRENCY") or "").strip()
-        amount_call = parse_number(call_row.get("AMOUNT_CALL"))
-        converted, warn = convert_amount_with_fallback(
-            amount_call, call_currency, fund_currency, fx_option, fx_option_other, fx_rates, fund_code, None, as_of, label=fund_label
-        )
+        buy_krw = parse_number(fx_row.get("BUY_KRW"))
+        converted, warn = convert_amount(buy_krw, "KRW", fund_currency, "SPOT", fx_rates, fund_code, None, as_of, label=fund_label)
         if warn:
             add_fx_warning(warnings, warn)
             continue
 
         entries.append({
-            "date": format_date_iso(call_row.get("DATE_CALL")),
+            "date": format_date_iso(fx_row.get("BUY_DATE_FX")),
             "amount": -converted,
             "note": fund_label,
             "type": "fof_call",
@@ -1538,29 +1545,33 @@ def fund_metrics():
         total_invested += converted
         investment_cashflow.append((parse_date(inv.get("DATE_INV")), -converted))
 
-    # ---------- FOF_CALL (재간접 펀드 Capital Call - 직투와 동일하게 투자금/Capital Called에 합산) ----------
+    # ---------- FOF_CALL 대응 FUND_FX_BUY(FX_TYPE=INITIAL) - 재간접 펀드 Capital Call 시 실제로
+    # 집행된 KRW 금액(BUY_KRW)을 그대로 합산합니다 (Fund Cash Flow와 동일한 방식 - 실거래 기록 우선). ----------
     fof_fund_map = {f.get("FOF_CODE"): f for f in get_sheet_dicts("FOF_FUND")}
     fof_inv_map = {i.get("FOF_INV_ID"): i for i in get_sheet_dicts("FOF_INVESTMENT") if i.get("FUND_CODE") == fund_code}
+    fof_call_to_inv = {
+        c.get("CALL_ID"): c.get("FOF_INV_ID")
+        for c in get_sheet_dicts("FOF_CALL")
+        if c.get("FOF_INV_ID") in fof_inv_map
+    }
     total_fof_called = 0.0
-    for call_row in get_sheet_dicts("FOF_CALL"):
-        fof_inv = fof_inv_map.get(call_row.get("FOF_INV_ID"))
-        if not fof_inv:
+    for fx_row in get_sheet_dicts("FUND_FX_BUY"):
+        if (fx_row.get("FX_TYPE") or "").strip() != "INITIAL":
             continue
-        call_date = parse_date(call_row.get("DATE_CALL"))
-        if call_date and call_date > as_of:
+        fof_inv_id = fof_call_to_inv.get(fx_row.get("CALL_ID"))
+        if not fof_inv_id:
             continue
+        buy_date = parse_date(fx_row.get("BUY_DATE_FX"))
+        if buy_date and buy_date > as_of:
+            continue
+        fof_inv = fof_inv_map[fof_inv_id]
         fof_fund = fof_fund_map.get(fof_inv.get("FOF_ID"), {})
         fund_label = fof_fund.get("FOF_NAME") or fof_inv.get("FOF_ID")
-        call_currency = (call_row.get("CURRENCY_CALL") or "").strip() or (fof_inv.get("FOF_INV_CURRENCY") or "").strip()
-        amount_call = parse_number(call_row.get("AMOUNT_CALL"))
-        converted, warn = convert_amount_with_fallback(
-            amount_call, call_currency, fund_currency, fx_option, fx_option_other, fx_rates, fund_code, None, as_of, label=fund_label
-        )
-        if warn:
-            add_fx_warning(warnings, warn)
+        converted = to_fund_currency(parse_number(fx_row.get("BUY_KRW")), "KRW", None, label=fund_label)
+        if converted is None:
             continue
         total_fof_called += converted
-        investment_cashflow.append((call_date, -converted))
+        investment_cashflow.append((buy_date, -converted))
 
     total_fund_expense = 0.0
     expense_cashflow = []  # (date, -amount) for Net IRR
