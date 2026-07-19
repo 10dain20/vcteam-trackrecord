@@ -37,8 +37,8 @@ _index_cache = {}
 # 앱이 사용하는 전체 시트 목록. 캐시가 빈 상태에서 첫 조회가 발생하면 이 시트들을
 # values:batchGet 한 번으로 모두 가져옵니다 (시트별 개별 요청 대비 HTTP 왕복 ~13회 -> 1회).
 ALL_SHEETS = [
-    "FUND_BASICS", "FUND_BASE_FX", "FUND_FX", "FUND_SUBSCRIPTION",
-    "FUND_EXPENSE", "FUND_DISTRIBUTION",
+    "FUND_BASICS", "FUND_BASE_FX", "FUND_FX_BUY", "FUND_SUB",
+    "FUND_EXPENSE", "FUND_DIST",
     "DIRECT_INVESTMENT", "DIRECT_COMPANY", "DIRECT_REALIZATION",
     "DIRECT_CONVERSION", "DIRECT_MARKUP_A", "DIRECT_MARKUP_E", "DIRECT_HOLDINGS",
 ]
@@ -183,6 +183,74 @@ def has_value(value):
     return value is not None and str(value).strip() != ""
 
 
+def get_investment_shares_and_price(inv):
+    """
+    DIRECT_INVESTMENT의 두 트랜치(INV1/INV2 - 한 CALL_ID가 두 종류의 증권을 동시에
+    인수한 경우)를 합산해 (보유주식수, 가중평균 단가, 종목유형)을 반환합니다.
+    현재는 모든 행이 INV1만 채워져 있지만(INV2=0), 두 트랜치가 함께 채워져도
+    주식수 가중평균 단가로 자연스럽게 확장됩니다.
+    """
+    shares1 = parse_number(inv.get("SHARES_INV1"))
+    price1 = parse_number(inv.get("PRICE_PER_SHARE_INV1"))
+    shares2 = parse_number(inv.get("SHARES_INV2"))
+    price2 = parse_number(inv.get("PRICE_PER_SHARE_INV2"))
+    shares = shares1 + shares2
+    price = (shares1 * price1 + shares2 * price2) / shares if shares else 0.0
+    sec_type = (inv.get("SECURITY_TYPE_INV1") or "").strip() or (inv.get("SECURITY_TYPE_INV2") or "").strip()
+    return shares, price, sec_type
+
+
+def resolve_investment_tranches(inv, call_conversions):
+    """
+    DIRECT_INVESTMENT의 두 트랜치(INV1/INV2)에 DIRECT_CONVERSION 이력을 날짜순으로 적용합니다.
+    한 CALL_ID가 서로 다른 두 증권을 동시에 보유하다 그 중 하나만 전환되는 경우
+    (예: RCPS 115,384주 + CS 115,384주로 투자했다가 RCPS만 CS로 전환)를 위한 것으로,
+    각 전환 행은 SECURITY_TYPE_PRE_CONV와 종목유형이 일치하는 트랜치에만 적용되고
+    나머지 트랜치는 그대로 유지됩니다. call_conversions는 이미 as_of 이하로
+    필터링/정렬된 (date, row) 튜플 리스트여야 합니다.
+    반환: [[sec_type, shares, price, currency], [sec_type, shares, price, currency]] (트랜치 2개)
+    """
+    base_currency = (inv.get("CURRENCY_INV") or "").strip()
+    tranches = [
+        [
+            (inv.get("SECURITY_TYPE_INV1") or "").strip(),
+            parse_number(inv.get("SHARES_INV1")),
+            parse_number(inv.get("PRICE_PER_SHARE_INV1")),
+            base_currency,
+        ],
+        [
+            (inv.get("SECURITY_TYPE_INV2") or "").strip(),
+            parse_number(inv.get("SHARES_INV2")),
+            parse_number(inv.get("PRICE_PER_SHARE_INV2")),
+            base_currency,
+        ],
+    ]
+
+    for _, conv in call_conversions:
+        pre_type = (conv.get("SECURITY_TYPE_PRE_CONV") or "").strip()
+        target = next((t for t in tranches if t[0] == pre_type), None)
+        if target is None:
+            continue  # 일치하는 트랜치가 없으면(데이터 불일치) 적용하지 않음
+        target[0] = (conv.get("SECURITY_TYPE_POST_CONV") or "").strip() or target[0]
+        target[3] = (conv.get("CURRENCY_CONV") or "").strip() or target[3]
+        # 빈 칸이면 아직 확정 전이므로 이전 값을 유지합니다 (parse_number의 0 폴백 방지).
+        if has_value(conv.get("SHARES_CONV")):
+            target[1] = parse_number(conv.get("SHARES_CONV"))
+        if has_value(conv.get("PRICE_PER_SHARE_CONV")):
+            target[2] = parse_number(conv.get("PRICE_PER_SHARE_CONV"))
+
+    return tranches
+
+
+def combine_tranches(tranches):
+    """resolve_investment_tranches의 두 트랜치를 (총 주수, 가중평균 단가, 종목유형, 통화)로 합칩니다."""
+    total_shares = sum(t[1] for t in tranches)
+    price = (sum(t[1] * t[2] for t in tranches) / total_shares) if total_shares else 0.0
+    sec_type = next((t[0] for t in tranches if t[1] and t[0]), "") or next((t[0] for t in tranches if t[0]), "")
+    currency = next((t[3] for t in tranches if t[1]), tranches[0][3] if tranches else "")
+    return total_shares, price, sec_type, currency
+
+
 def parse_date(value):
     """
     'YYYY-MM-DD' 문자열 또는 Google Sheets 일련번호(숫자, UNFORMATTED_VALUE로 조회 시 날짜 셀의 형태)를
@@ -313,7 +381,7 @@ def get_currencies():
     # 실거래 환율이 없는 투자건(KRW로 집행된 건 등)도 대체환율이 필요할 수 있습니다.
     needs_fx_other = fund_currency != "KRW"
     subscription_currency = None
-    for s in get_sheet_dicts("FUND_SUBSCRIPTION"):
+    for s in get_sheet_dicts("FUND_SUB"):
         if s.get("FUND_CODE") != fund_code:
             continue
         sub_currency = (s.get("CURRENCY_SUB") or "").strip() or fund_currency
@@ -377,21 +445,21 @@ def _get_base_fx_index():
 
 
 def _get_fund_fx_rate_index():
-    """FUND_FX를 CALL_ID -> BUY_RATE_FX 인덱스로 캐시합니다 (INITIAL 타입 우선, 없으면 첫 번째 행)."""
-    if "FUND_FX" not in _index_cache:
+    """FUND_FX_BUY를 CALL_ID -> BUY_RATE_FX 인덱스로 캐시합니다 (INITIAL 타입 우선, 없으면 첫 번째 행)."""
+    if "FUND_FX_BUY" not in _index_cache:
         first_rows = {}
         initial_rows = {}
-        for row in get_sheet_dicts("FUND_FX"):
+        for row in get_sheet_dicts("FUND_FX_BUY"):
             call_id = row.get("CALL_ID")
             if call_id not in first_rows:
                 first_rows[call_id] = row
             if call_id not in initial_rows and row.get("FX_TYPE", "").strip() == "INITIAL":
                 initial_rows[call_id] = row
-        _index_cache["FUND_FX"] = {
+        _index_cache["FUND_FX_BUY"] = {
             call_id: parse_number(initial_rows.get(call_id, row).get("BUY_RATE_FX"))
             for call_id, row in first_rows.items()
         }
-    return _index_cache["FUND_FX"]
+    return _index_cache["FUND_FX_BUY"]
 
 
 def get_rate_to_krw(currency, fx_option, fx_rates, fund_code, call_id, as_of):
@@ -465,7 +533,7 @@ def format_fx_warnings(warnings):
 
 def get_subscription_currency(fund_code, fund_currency):
     """이 펀드의 약정통화(FUND_SUBSCRIPTION.CURRENCY_SUB)를 반환합니다. 값이 없으면 펀드통화로 폴백합니다."""
-    for s in get_sheet_dicts("FUND_SUBSCRIPTION"):
+    for s in get_sheet_dicts("FUND_SUB"):
         if s.get("FUND_CODE") != fund_code:
             continue
         sub_currency = (s.get("CURRENCY_SUB") or "").strip()
@@ -563,25 +631,14 @@ def compute_and_write_holdings(fund_code, as_of):
             if inv_date and inv_date > as_of:
                 continue  # 아직 투자가 발생하지 않은 시점
 
-            sec_type = (inv.get("SECURITY_TYPE_INV") or "").strip()
-            currency = (inv.get("CURRENCY_INV") or "").strip()
-            shares = parse_number(inv.get("SHARES_INV"))
-            price = parse_number(inv.get("PRICE_PER_SHARE_INV"))
-
             call_conversions = sorted(
                 (dc for dc in conversions_by_call.get(call_id, []) if dc[0] <= as_of),
                 key=lambda dc: dc[0],
             )
-            # 전환/마크업 행이 있어도 특정 칸(주수/단가 등)이 비어 있으면 "아직 확정 안 됨"으로 보고
-            # 직전 값(투자 단가 등)을 그대로 유지합니다 - 빈 칸을 parse_number()가 0으로 반환해
-            # 유효했던 원가를 0으로 덮어써버리는 것을 방지하기 위함입니다.
-            for _, conv in call_conversions:
-                sec_type = (conv.get("SECURITY_TYPE_CONV") or "").strip() or sec_type
-                currency = (conv.get("CURRENCY_CONV") or "").strip() or currency
-                if has_value(conv.get("SHARES_CONV")):
-                    shares = parse_number(conv.get("SHARES_CONV"))
-                if has_value(conv.get("PRICE_PER_SHARE_CONV")):
-                    price = parse_number(conv.get("PRICE_PER_SHARE_CONV"))
+            # 두 트랜치(INV1/INV2 - 한 CALL_ID가 서로 다른 두 증권을 동시에 보유한 경우)에
+            # 전환 이력을 각각 적용합니다 (SECURITY_TYPE_PRE_CONV가 일치하는 트랜치만 전환됨).
+            tranches = resolve_investment_tranches(inv, call_conversions)
+            shares, price, sec_type, currency = combine_tranches(tranches)
 
             realized_shares = sum(
                 parse_number(r.get("SHARES_REAL"))
@@ -779,7 +836,7 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
         company_label = company_name_map.get(company_id, company_id)
         native_currency = (inv.get("CURRENCY_INV") or "").strip()
         amount_inv = parse_number(inv.get("AMOUNT_INV"))
-        shares_inv = parse_number(inv.get("SHARES_INV"))
+        shares_inv, _, _ = get_investment_shares_and_price(inv)
         post_shares_inv = parse_number(inv.get("POST_SHARES_INV"))
         postval_inv = parse_number(inv.get("POSTVAL_INV"))
 
@@ -823,16 +880,12 @@ def compute_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_rates
         # REALIZATION/MARKUP은 반영하지 않음)
         remaining_balance = None
         if shares_held:
-            cost_basis_currency = native_currency
-            cost_basis_price = parse_number(inv.get("PRICE_PER_SHARE_INV"))
-
-            call_conversions = [dc for dc in conversions_by_call.get(call_id, []) if dc[0] <= as_of]
-            if call_conversions:
-                latest_conv = max(call_conversions, key=lambda dc: dc[0])[1]
-                cost_basis_currency = (latest_conv.get("CURRENCY_CONV") or "").strip() or cost_basis_currency
-                # PRICE_PER_SHARE_CONV가 비어 있으면 아직 확정 전이므로 투자 단가를 그대로 유지합니다.
-                if has_value(latest_conv.get("PRICE_PER_SHARE_CONV")):
-                    cost_basis_price = parse_number(latest_conv.get("PRICE_PER_SHARE_CONV"))
+            call_conversions = sorted(
+                (dc for dc in conversions_by_call.get(call_id, []) if dc[0] <= as_of),
+                key=lambda dc: dc[0],
+            )
+            tranches = resolve_investment_tranches(inv, call_conversions)
+            _, cost_basis_price, _, cost_basis_currency = combine_tranches(tranches)
 
             remaining_target = cost_basis_currency if display_currency == "NATIVE" else fund_currency
             converted_remaining, remaining_warn = convert_amount_with_fallback(
@@ -974,7 +1027,7 @@ def fund_cashflow():
     investments = get_sheet_dicts("DIRECT_INVESTMENT")
     companies = get_sheet_dicts("DIRECT_COMPANY")
     expenses = get_sheet_dicts("FUND_EXPENSE")
-    distributions = get_sheet_dicts("FUND_DISTRIBUTION")
+    distributions = get_sheet_dicts("FUND_DIST")
 
     company_name_map = {c.get("COMPANY_ID"): c.get("COMPANY_NAME") for c in companies}
 
@@ -1131,7 +1184,7 @@ def fund_metrics():
     target_irr_raw = fund_info.get("FUND_TARGET_IRR")
     target_hedge_raw = fund_info.get("FUND_TARGET_HEDGE_RATE")
 
-    subscriptions = get_sheet_dicts("FUND_SUBSCRIPTION")
+    subscriptions = get_sheet_dicts("FUND_SUB")
     commitment_total = 0.0
     subscription_currency = None
     for s in subscriptions:
@@ -1166,8 +1219,8 @@ def fund_metrics():
     companies = get_sheet_dicts("DIRECT_COMPANY")
     realizations = get_sheet_dicts("DIRECT_REALIZATION")
     expenses = get_sheet_dicts("FUND_EXPENSE")
-    distributions = get_sheet_dicts("FUND_DISTRIBUTION")
-    fund_fx_rows = get_sheet_dicts("FUND_FX")
+    distributions = get_sheet_dicts("FUND_DIST")
+    fund_fx_rows = get_sheet_dicts("FUND_FX_BUY")
 
     company_name_map = {c.get("COMPANY_ID"): c.get("COMPANY_NAME") for c in companies}
 
@@ -1323,7 +1376,7 @@ def fund_metrics():
         hedged_amount = sum(
             parse_number(fx.get("SELL_AMOUNT_FX"))
             for fx in fund_fx_rows
-            if (fx.get("FX_CURRENCY") or "").strip() == currency
+            if (fx.get("FX_CURRENCY_BUY") or "").strip() == currency
             and (fx.get("FX_TYPE") or "").strip() == "INITIAL"
             and fx.get("CALL_ID") in fund_call_ids
         )
