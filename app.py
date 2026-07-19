@@ -1769,11 +1769,15 @@ def verify_cashflow():
 
     Request body: { "year": 2026, "month": 6, "fund": "군공" }
 
-    기준값 = SUM(DIRECT_INVESTMENT.AMOUNT_INV) + SUM(FUND_EXPENSE.AMOUNT_EXP) + SUM(재간접 펀드 Capital
-    Call 실제 집행 KRW), 이 펀드(FUND_CODE)의 as-of(연/월) 이하 날짜 항목만. 투자통화가 펀드 약정통화와
-    다르면 FUND_FX_BUY에서 CALL_ID로 매칭되는 FX_TYPE="INITIAL" 행의 BUY_RATE_FX로 환산합니다
-    (= EXECUTED 방식과 동일). 재간접(FOF_CALL) 항목은 FUND_FX_BUY의 INITIAL 행에 이미 기록된 실제
-    집행 KRW(BUY_KRW)를 그대로 씁니다 (Fund Cash Flow/Fund Metrics와 동일한 방식).
+    수익자에게 요청한 돈(캐피탈콜) = SUM(DIRECT_INVESTMENT.AMOUNT_INV) + SUM(FUND_EXPENSE.AMOUNT_EXP)
+    + SUM(재간접 펀드 Capital Call 실제 집행 KRW), 이 펀드(FUND_CODE)의 as-of(연/월) 이하 날짜 항목만.
+    투자통화가 펀드 약정통화와 다르면 FUND_FX_BUY에서 CALL_ID로 매칭되는 FX_TYPE="INITIAL" 행의
+    BUY_RATE_FX로 환산합니다(= EXECUTED 방식과 동일). 재간접(FOF_CALL) 항목은 FUND_FX_BUY의 INITIAL
+    행에 이미 기록된 실제 집행 KRW(BUY_KRW)를 그대로 씁니다 (Fund Cash Flow/Fund Metrics와 동일한 방식).
+
+    수익자에게 나간 돈(분배) = FUND_DIST를 DISTRIBUTION_TYPE별로 집계 - "RETURN OF CAPITAL"은
+    return_of_capital(업로드 파일의 "원본(해지)"과 대조), "REALIZED GAIN"은 realized_gain(업로드
+    파일의 "이익분배금"과 대조)으로 각각 반환합니다.
     """
     clear_data_caches()
     params = request.json or {}
@@ -1860,12 +1864,40 @@ def verify_cashflow():
             continue
         total_expense += converted
 
+    # 수익자에게 나간 돈(FUND_DIST) - DISTRIBUTION_TYPE별로 원본상환/이익분배금을 구분 집계합니다.
+    # 업로드 파일의 "원본(해지)"/"이익분배금" 컬럼과 각각 대조합니다.
+    return_of_capital_total = 0.0
+    realized_gain_total = 0.0
+    for dist in get_sheet_dicts("FUND_DIST"):
+        if dist.get("FUND_CODE") != fund_code:
+            continue
+        dist_date = parse_date(dist.get("DATE_DIST"))
+        if dist_date and dist_date > as_of:
+            continue
+        dist_type = (dist.get("DISTRIBUTION_TYPE") or "").strip().upper()
+        if dist_type not in ("RETURN OF CAPITAL", "REALIZED GAIN"):
+            continue
+        dist_currency = (dist.get("CURRENCY_DIST") or "").strip() or fund_currency
+        dist_label = (dist.get("NOTE_DIST") or "").strip() or format_date_iso(dist.get("DATE_DIST")) or "분배"
+        converted, warn = convert_amount(
+            parse_number(dist.get("AMOUNT_DIST")), dist_currency, fund_currency, "EXECUTED", {}, fund_code, None, as_of, label=dist_label
+        )
+        if warn:
+            add_fx_warning(warnings, warn)
+            continue
+        if dist_type == "RETURN OF CAPITAL":
+            return_of_capital_total += converted
+        else:
+            realized_gain_total += converted
+
     return jsonify({
         "fund_currency": fund_currency,
         "as_of": as_of.isoformat(),
         "total_invested": total_invested + total_fof_invested,
         "total_expense": total_expense,
         "total_cost": total_invested + total_fof_invested + total_expense,
+        "return_of_capital": return_of_capital_total,
+        "realized_gain": realized_gain_total,
         "warnings": format_fx_warnings(warnings),
     })
 

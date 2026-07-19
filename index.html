@@ -2320,15 +2320,27 @@
         const headerRow = rows[0] || [];
         let colIdx = headerRow.findIndex((cell) => String(cell || "").trim() === "금액");
         if (colIdx === -1) colIdx = 2; // 헤더에서 못 찾으면 3번째 컬럼(C열)으로 대체
+        const rocColIdx = headerRow.findIndex((cell) => String(cell || "").trim() === "원본(해지)");
+        const gainColIdx = headerRow.findIndex((cell) => String(cell || "").trim() === "이익분배금");
 
         let negativeSum = 0;
+        let rocSum = 0;
+        let gainSum = 0;
         for (let i = 1; i < rows.length; i++) {
           const val = rows[i][colIdx];
           if (typeof val === "number" && val < 0) {
             negativeSum += val;
           }
+          if (rocColIdx !== -1 && typeof rows[i][rocColIdx] === "number") {
+            rocSum += rows[i][rocColIdx];
+          }
+          if (gainColIdx !== -1 && typeof rows[i][gainColIdx] === "number") {
+            gainSum += rows[i][gainColIdx];
+          }
         }
         const uploadedTotal = Math.abs(negativeSum);
+        const uploadedRoc = Math.abs(rocSum);
+        const uploadedGain = Math.abs(gainSum);
 
         const res = await fetch(`${API_BASE_URL}/verify-cashflow`, {
           method: "POST",
@@ -2343,19 +2355,26 @@
         }
 
         // 원 단위로 정확히 일치하는지 확인 (부동소수점 표현 오차 제거를 위해 정수 반올림 후 비교)
-        const uploadedRounded = Math.round(uploadedTotal);
-        const expectedRounded = Math.round(data.total_cost);
-        const diff = uploadedRounded - expectedRounded;
+        // 1) 수익자한테 요청한 돈(캐피탈콜+비용), 2) 원본(해지) 상환, 3) 이익분배금 - 세 가지를 각각 대조합니다.
+        const checks = [
+          { label: "요청한 돈(캐피탈콜+비용)", uploaded: uploadedTotal, expected: data.total_cost },
+          { label: "원본(해지)", uploaded: uploadedRoc, expected: data.return_of_capital },
+          { label: "이익분배금", uploaded: uploadedGain, expected: data.realized_gain },
+        ];
 
-        const uploadedLabel = uploadedRounded.toLocaleString("ko-KR") + "원";
-        const expectedLabel = expectedRounded.toLocaleString("ko-KR") + "원";
+        resultEl.innerHTML = checks.map((c) => {
+          const uploadedRounded = Math.round(c.uploaded);
+          const expectedRounded = Math.round(c.expected);
+          const diff = uploadedRounded - expectedRounded;
+          const uploadedLabel = uploadedRounded.toLocaleString("ko-KR") + "원";
+          const expectedLabel = expectedRounded.toLocaleString("ko-KR") + "원";
 
-        if (diff === 0) {
-          resultEl.innerHTML = `<span style="color: #007a00;">✓ 일치 (업로드: ${uploadedLabel} / 계산값: ${expectedLabel})</span>`;
-        } else {
+          if (diff === 0) {
+            return `<div style="color: #007a00;">✓ ${c.label} 일치 (업로드: ${uploadedLabel} / 계산값: ${expectedLabel})</div>`;
+          }
           const diffLabel = Math.abs(diff).toLocaleString("ko-KR") + "원";
-          resultEl.innerHTML = `<span style="color: #cc0000;">✗ 불일치 (업로드: ${uploadedLabel} / 계산값: ${expectedLabel} / 차이: ${diffLabel})</span>`;
-        }
+          return `<div style="color: #cc0000;">✗ ${c.label} 불일치 (업로드: ${uploadedLabel} / 계산값: ${expectedLabel} / 차이: ${diffLabel})</div>`;
+        }).join("");
       } catch (err) {
         console.error("Error verifying cash flow:", err);
         resultEl.innerHTML = '<span style="color: #cc0000;">파일을 확인하지 못했습니다.</span>';
