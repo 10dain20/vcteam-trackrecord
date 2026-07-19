@@ -965,7 +965,7 @@
         <div id="investment-overview" style="display: none;">
           <div class="overview-header-row">
             <div class="overview-header-left">
-              <h2 class="section-title">Investment Overview</h2>
+              <h2 class="section-title" id="overview-main-title">Investment Overview</h2>
               <div class="currency-toggle-switch">
                 <span class="toggle-label active" id="label-native">투자통화</span>
                 <label class="switch">
@@ -1616,11 +1616,26 @@
         ? cached.warnings.map((w) => `<div class="overview-warning">⚠ ${escapeHtml(w)}</div>`).join("")
         : "";
 
-      // 직투 건이 있는 펀드는 기존 표를, 재간접(FoF)만 있는 프로젝트 펀드는 FoF 표를 보여줍니다
-      // (두 유형을 동시에 가진 펀드는 현재 없지만, 있다면 둘 다 표시됩니다. 아무 것도 없으면
-      // 기존 "해당 조건의 투자 건이 없습니다" 메시지가 보이도록 직투 표시 영역은 남겨둡니다).
-      document.getElementById("direct-overview-section").style.display = fofOverviewRows.length > 0 && overviewRows.length === 0 ? "none" : "block";
-      document.getElementById("fof-overview-section").style.display = fofOverviewRows.length > 0 ? "block" : "none";
+      // 1. 직투 건만 있으면 "Direct Investment Overview"만, 2. 재간접(FoF)만 있으면
+      // "FOF Investment Overview"만, 3. 둘 다 있으면 Direct 표 아래 FOF 표를 순서대로 보여줍니다.
+      const hasDirect = overviewRows.length > 0;
+      const hasFof = fofOverviewRows.length > 0;
+
+      document.getElementById("direct-overview-section").style.display = hasDirect || !hasFof ? "block" : "none";
+      document.getElementById("fof-overview-section").style.display = hasFof ? "block" : "none";
+
+      const mainTitleEl = document.getElementById("overview-main-title");
+      if (hasDirect) {
+        mainTitleEl.textContent = "Direct Investment Overview";
+      } else if (hasFof) {
+        mainTitleEl.textContent = "FOF Investment Overview";
+      } else {
+        mainTitleEl.textContent = "Investment Overview";
+      }
+
+      // FOF 섹션 자체의 소제목은 두 표가 동시에 보일 때만 표시 (Direct 표와 구분하기 위함).
+      // FOF만 있을 때는 위 메인 타이틀이 이미 "FOF Investment Overview"이므로 중복 표시하지 않습니다.
+      document.getElementById("fof-overview-title").style.display = hasDirect && hasFof ? "block" : "none";
 
       renderOverviewTable();
       renderFofOverviewTable();
