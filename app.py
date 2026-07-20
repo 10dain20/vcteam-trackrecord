@@ -37,7 +37,7 @@ _index_cache = {}
 # 앱이 사용하는 전체 시트 목록. 캐시가 빈 상태에서 첫 조회가 발생하면 이 시트들을
 # values:batchGet 한 번으로 모두 가져옵니다 (시트별 개별 요청 대비 HTTP 왕복 ~13회 -> 1회).
 ALL_SHEETS = [
-    "FUND_BASICS", "FUND_BASE_FX", "FUND_FX_BUY", "FUND_SUB",
+    "FUND_BASICS", "FUND_BASE_FX", "FUND_FX", "FUND_SUB",
     "FUND_EXPENSE", "FUND_DIST",
     "DIRECT_INVESTMENT", "DIRECT_COMPANY", "DIRECT_REALIZATION",
     "DIRECT_CONVERSION", "DIRECT_MARKUP_A", "DIRECT_MARKUP_E", "DIRECT_HOLDINGS",
@@ -448,21 +448,21 @@ def _get_base_fx_index():
 
 
 def _get_fund_fx_rate_index():
-    """FUND_FX_BUY를 CALL_ID -> BUY_RATE_FX 인덱스로 캐시합니다 (INITIAL 타입 우선, 없으면 첫 번째 행)."""
-    if "FUND_FX_BUY" not in _index_cache:
+    """FUND_FX를 CALL_ID -> BUY_RATE_FX 인덱스로 캐시합니다 (INITIAL 타입 우선, 없으면 첫 번째 행)."""
+    if "FUND_FX" not in _index_cache:
         first_rows = {}
         initial_rows = {}
-        for row in get_sheet_dicts("FUND_FX_BUY"):
+        for row in get_sheet_dicts("FUND_FX"):
             call_id = row.get("CALL_ID")
             if call_id not in first_rows:
                 first_rows[call_id] = row
             if call_id not in initial_rows and row.get("FX_TYPE", "").strip() == "INITIAL":
                 initial_rows[call_id] = row
-        _index_cache["FUND_FX_BUY"] = {
+        _index_cache["FUND_FX"] = {
             call_id: parse_number(initial_rows.get(call_id, row).get("BUY_RATE_FX"))
             for call_id, row in first_rows.items()
         }
-    return _index_cache["FUND_FX_BUY"]
+    return _index_cache["FUND_FX"]
 
 
 def get_rate_to_krw(currency, fx_option, fx_rates, fund_code, call_id, as_of):
@@ -565,13 +565,13 @@ def format_rate_sanity_warnings(warnings):
 
 def check_fund_fx_rate_sanity(fund_code, call_ids):
     """
-    이 펀드에서 실제 쓰이는 집행환율(FUND_FX_BUY.BUY_RATE_FX)과 약정일환율(FUND_BASE_FX.BASE_RATE)이
+    이 펀드에서 실제 쓰이는 집행환율(FUND_FX.BUY_RATE_FX)과 약정일환율(FUND_BASE_FX.BASE_RATE)이
     통화별 정상 범위를 벗어나면 경고를 생성합니다 - 환율 칸에 금액을 잘못 입력하는 등의 오타를 잡기 위함
     (예: 환율이 7,500,000처럼 들어가 있으면 실제 계산에 그대로 쓰여 투자금액이 터무니없이 커집니다).
     call_ids: 이 펀드에서 실제 사용 중인 CALL_ID 집합 (관련 없는 다른 펀드의 오타까지 보고하지 않기 위함)
     """
     warnings = {}
-    for row in get_sheet_dicts("FUND_FX_BUY"):
+    for row in get_sheet_dicts("FUND_FX"):
         call_id = row.get("CALL_ID")
         if call_id not in call_ids:
             continue
@@ -1184,11 +1184,15 @@ def compute_fof_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_r
                 unrealized = converted_unrealized
 
         total_value = None
-        moic = None
+        moic = None  # TVPI (Total Value to Paid-In) = TOTAL VALUE / 투자금액(Capital Called)
         if not dist_conversion_failed and unrealized is not None:
             total_value = realized_total + unrealized
             if amount_called:
                 moic = total_value / amount_called
+
+        # 소진율 = 투자금액(누적 콜) / 약정금액. DPI(Distributions to Paid-In) = REALIZED / 투자금액.
+        deployment_rate = (amount_called / commitment_amount * 100) if commitment_amount else None
+        dpi = (realized_total / amount_called) if (amount_called and not dist_conversion_failed) else None
 
         rows.append({
             "fof_inv_id": fof_inv_id,
@@ -1204,6 +1208,8 @@ def compute_fof_investment_rows(fund_code, fund_currency, as_of, fx_option, fx_r
             "unrealized": unrealized,
             "total_value": total_value,
             "moic": moic,
+            "deployment_rate": deployment_rate,
+            "dpi": dpi,
         })
 
     return rows, warnings
@@ -1311,9 +1317,9 @@ def fund_cashflow():
             "type": "expense",
         })
 
-    # Cash Out: FOF_CALL 대응 FUND_FX_BUY(FX_TYPE=INITIAL) - 재간접 펀드 Capital Call 시 실제로
+    # Cash Out: FOF_CALL 대응 FUND_FX(FX_TYPE=INITIAL) - 재간접 펀드 Capital Call 시 실제로
     # 집행된 KRW 금액(BUY_KRW)을 그대로 씁니다. FOF_CALL.AMOUNT_CALL(외화 표시 콜 금액)을 별도
-    # 환율로 재계산하면 실제 집행 당시 환율과 달라지므로, 실거래 기록인 FUND_FX_BUY를 사용합니다.
+    # 환율로 재계산하면 실제 집행 당시 환율과 달라지므로, 실거래 기록인 FUND_FX를 사용합니다.
     fof_fund_map = {f.get("FOF_CODE"): f for f in get_sheet_dicts("FOF_FUND")}
     fof_inv_map = {i.get("FOF_INV_ID"): i for i in get_sheet_dicts("FOF_INVESTMENT") if i.get("FUND_CODE") == fund_code}
     fof_call_to_inv = {
@@ -1321,7 +1327,7 @@ def fund_cashflow():
         for c in get_sheet_dicts("FOF_CALL")
         if c.get("FOF_INV_ID") in fof_inv_map
     }
-    for fx_row in get_sheet_dicts("FUND_FX_BUY"):
+    for fx_row in get_sheet_dicts("FUND_FX"):
         if (fx_row.get("FX_TYPE") or "").strip() != "INITIAL":
             continue
         fof_inv_id = fof_call_to_inv.get(fx_row.get("CALL_ID"))
@@ -1518,7 +1524,7 @@ def fund_metrics():
     realizations = get_sheet_dicts("DIRECT_REALIZATION")
     expenses = get_sheet_dicts("FUND_EXPENSE")
     distributions = get_sheet_dicts("FUND_DIST")
-    fund_fx_rows = get_sheet_dicts("FUND_FX_BUY")
+    fund_fx_rows = get_sheet_dicts("FUND_FX")
 
     company_name_map = {c.get("COMPANY_ID"): c.get("COMPANY_NAME") for c in companies}
 
@@ -1545,7 +1551,7 @@ def fund_metrics():
         total_invested += converted
         investment_cashflow.append((parse_date(inv.get("DATE_INV")), -converted))
 
-    # ---------- FOF_CALL 대응 FUND_FX_BUY(FX_TYPE=INITIAL) - 재간접 펀드 Capital Call 시 실제로
+    # ---------- FOF_CALL 대응 FUND_FX(FX_TYPE=INITIAL) - 재간접 펀드 Capital Call 시 실제로
     # 집행된 KRW 금액(BUY_KRW)을 그대로 합산합니다 (Fund Cash Flow와 동일한 방식 - 실거래 기록 우선). ----------
     fof_fund_map = {f.get("FOF_CODE"): f for f in get_sheet_dicts("FOF_FUND")}
     fof_inv_map = {i.get("FOF_INV_ID"): i for i in get_sheet_dicts("FOF_INVESTMENT") if i.get("FUND_CODE") == fund_code}
@@ -1555,7 +1561,7 @@ def fund_metrics():
         if c.get("FOF_INV_ID") in fof_inv_map
     }
     total_fof_called = 0.0
-    for fx_row in get_sheet_dicts("FUND_FX_BUY"):
+    for fx_row in get_sheet_dicts("FUND_FX"):
         if (fx_row.get("FX_TYPE") or "").strip() != "INITIAL":
             continue
         fof_inv_id = fof_call_to_inv.get(fx_row.get("CALL_ID"))
@@ -1771,8 +1777,8 @@ def verify_cashflow():
 
     수익자에게 요청한 돈(캐피탈콜) = SUM(DIRECT_INVESTMENT.AMOUNT_INV) + SUM(FUND_EXPENSE.AMOUNT_EXP)
     + SUM(재간접 펀드 Capital Call 실제 집행 KRW), 이 펀드(FUND_CODE)의 as-of(연/월) 이하 날짜 항목만.
-    투자통화가 펀드 약정통화와 다르면 FUND_FX_BUY에서 CALL_ID로 매칭되는 FX_TYPE="INITIAL" 행의
-    BUY_RATE_FX로 환산합니다(= EXECUTED 방식과 동일). 재간접(FOF_CALL) 항목은 FUND_FX_BUY의 INITIAL
+    투자통화가 펀드 약정통화와 다르면 FUND_FX에서 CALL_ID로 매칭되는 FX_TYPE="INITIAL" 행의
+    BUY_RATE_FX로 환산합니다(= EXECUTED 방식과 동일). 재간접(FOF_CALL) 항목은 FUND_FX의 INITIAL
     행에 이미 기록된 실제 집행 KRW(BUY_KRW)를 그대로 씁니다 (Fund Cash Flow/Fund Metrics와 동일한 방식).
 
     수익자에게 나간 돈(분배) = FUND_DIST를 DISTRIBUTION_TYPE별로 집계 - "RETURN OF CAPITAL"은
@@ -1822,7 +1828,7 @@ def verify_cashflow():
             continue
         total_invested += converted
 
-    # 재간접(FOF_CALL) - FUND_FX_BUY의 INITIAL 행에 기록된 실제 집행 KRW(BUY_KRW)를 그대로 합산
+    # 재간접(FOF_CALL) - FUND_FX의 INITIAL 행에 기록된 실제 집행 KRW(BUY_KRW)를 그대로 합산
     fof_inv_map = {i.get("FOF_INV_ID"): i for i in get_sheet_dicts("FOF_INVESTMENT") if i.get("FUND_CODE") == fund_code}
     fof_call_to_inv = {
         c.get("CALL_ID"): c.get("FOF_INV_ID")
@@ -1830,7 +1836,7 @@ def verify_cashflow():
         if c.get("FOF_INV_ID") in fof_inv_map
     }
     total_fof_invested = 0.0
-    for fx_row in get_sheet_dicts("FUND_FX_BUY"):
+    for fx_row in get_sheet_dicts("FUND_FX"):
         if (fx_row.get("FX_TYPE") or "").strip() != "INITIAL":
             continue
         if fx_row.get("CALL_ID") not in fof_call_to_inv:

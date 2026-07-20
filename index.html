@@ -1819,23 +1819,23 @@
     // 재간접(FoF) 투자 Overview - 프로젝트 펀드(예: 벤2가 DCVC V, L.P.에 투자)용 표.
     // 직투 표와 컬럼이 달라(지분율 없음, 약정금액 있음) 별도 렌더링 함수를 둡니다.
     const FOF_OVERVIEW_COL_WIDTH = {
-      fund_name: "18%",
-      country: "8%",
+      fund_name: "20%",
       currency_inv: "8%",
       date_inv: "9%",
-      commitment_amount: "9.5%",
-      amount_called: "9.5%",
-      remaining_balance: "9.5%",
-      realized: "9.5%",
-      unrealized: "9.5%",
-      total_value: "9.5%",
-      moic: "9.5%",
+      commitment_amount: "9%",
+      amount_called: "9%",
+      remaining_balance: "9%",
+      realized: "9%",
+      unrealized: "9%",
+      total_value: "9%",
+      deployment_rate: "6%",
+      moic: "6%",
+      dpi: "6%",
     };
 
     function getFofOverviewColumns() {
       return [
         { key: "fund_name", label: "펀드명", type: "text" },
-        { key: "country", label: "국가", type: "text" },
         { key: "currency_inv", label: "투자통화", type: "text" },
         { key: "date_inv", label: "투자시점", type: "date" },
         { key: "commitment_amount", label: "약정금액", type: "currency" },
@@ -1844,7 +1844,9 @@
         { key: "realized", label: "REALIZED", type: "currency" },
         { key: "unrealized", label: "UNREALIZED", type: "currency" },
         { key: "total_value", label: "TOTAL VALUE", type: "currency" },
-        { key: "moic", label: "MOIC", type: "moic" },
+        { key: "deployment_rate", label: "소진율", type: "percent" },
+        { key: "moic", label: "TVPI", type: "moic" },
+        { key: "dpi", label: "DPI", type: "moic" },
       ];
     }
 
@@ -1897,6 +1899,9 @@
           } else if (col.type === "moic") {
             cellContent = formatMoic(val);
             cellClass = "num";
+          } else if (col.type === "percent") {
+            cellContent = formatPercent(val);
+            cellClass = "num";
           }
 
           html += `<td class="${cellClass}">${cellContent}</td>`;
@@ -1910,6 +1915,7 @@
         columns.forEach((col, idx) => {
           let cellContent = "-";
           let cellClass = "";
+          const sumAmountCalled = rows.reduce((acc, r) => acc + (r.amount_called || 0), 0);
 
           if (idx === 0) {
             cellContent = "합계";
@@ -1917,10 +1923,17 @@
             const sum = rows.reduce((acc, r) => acc + (r[col.key] || 0), 0);
             cellContent = formatCurrencyDisplay(sum, overviewFundCurrency);
             cellClass = "num";
-          } else if (col.type === "moic") {
+          } else if (col.key === "deployment_rate") {
+            const sumCommitment = rows.reduce((acc, r) => acc + (r.commitment_amount || 0), 0);
+            cellContent = sumCommitment ? formatPercent(sumAmountCalled / sumCommitment * 100) : "-";
+            cellClass = "num";
+          } else if (col.key === "moic") {
             const sumTotalValue = rows.reduce((acc, r) => acc + (r.total_value || 0), 0);
-            const sumAmountCalled = rows.reduce((acc, r) => acc + (r.amount_called || 0), 0);
             cellContent = sumAmountCalled ? formatMoic(sumTotalValue / sumAmountCalled) : "-";
+            cellClass = "num";
+          } else if (col.key === "dpi") {
+            const sumRealized = rows.reduce((acc, r) => acc + (r.realized || 0), 0);
+            cellContent = sumAmountCalled ? formatMoic(sumRealized / sumAmountCalled) : "-";
             cellClass = "num";
           }
 
@@ -1974,17 +1987,18 @@
       if (fofOverviewRows.length > 0) {
         const fofExportData = fofOverviewRows.map((row) => ({
           "펀드명": row.fund_name || "",
-          "국가": row.country || "",
           "투자통화": row.currency_inv || "",
           "표시통화": row.display_currency || "",
           "투자시점": row.date_inv || "",
           "약정금액": row.commitment_amount,
-          "투자금액": row.amount_called,
+          "투자금액 (Capital Called)": row.amount_called,
           "투자잔액": row.remaining_balance,
           "REALIZED": row.realized,
           "UNREALIZED": row.unrealized,
           "TOTAL VALUE": row.total_value,
-          "MOIC": row.moic,
+          "소진율(%)": row.deployment_rate,
+          "TVPI": row.moic,
+          "DPI": row.dpi,
         }));
         XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(fofExportData), "FoF Investment");
       }
